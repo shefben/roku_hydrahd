@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="PosterItem" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="onContent" />
+        <field id="focusPercent" type="float" onChange="onFocus" />
+        <field id="width" type="float" value="220" />
+        <field id="height" type="float" value="370" />
+    </interface>
+    <script type="text/brightscript">
+        <![CDATA[
+        sub init()
+            m.poster = m.top.findNode("poster")
+            m.title = m.top.findNode("title")
+            m.year = m.top.findNode("year")
+            m.badge = m.top.findNode("badge")
+            m.rating = m.top.findNode("rating")
+            m.frame = m.top.findNode("frame")
+        end sub
+
+        sub onContent()
+            c = m.top.itemContent
+            if c = invalid then return
+            m.poster.uri = c.HDPosterUrl
+            m.title.text = c.title
+            m.year.text = c.shortDescriptionLine2
+            if c.shortDescriptionLine1 <> invalid and c.shortDescriptionLine1 <> "" then
+                m.rating.text = "* " + c.shortDescriptionLine1
+                m.rating.visible = true
+            else
+                m.rating.visible = false
+            end if
+            if c.releaseDate <> invalid and c.releaseDate <> "" then
+                m.badge.text = c.releaseDate
+                m.badge.visible = true
+            else
+                m.badge.visible = false
+            end if
+        end sub
+
+        sub onFocus()
+            f = m.top.focusPercent
+            if f >= 0.5 then
+                m.frame.color = "0xff2424ff"
+                m.title.color = "0xffffffff"
+            else
+                m.frame.color = "0x00000000"
+                m.title.color = "0xc8c8c8ff"
+            end if
+        end sub
+        ]]>
+    </script>
+    <children>
+        <Rectangle id="frame" width="232" height="358" translation="[-6,-6]" color="0x00000000" />
+        <Poster id="poster" width="220" height="330" translation="[0,0]" loadDisplayMode="scaleToZoom"
+                failedBitmapUri="pkg:/images/placeholder.png" loadingBitmapUri="pkg:/images/placeholder.png" />
+        <Label id="badge" translation="[8, 8]" text="" font="font:SmallestBoldSystemFont" color="0xffffffff" />
+        <Label id="rating" translation="[8, 300]" text="" font="font:SmallestBoldSystemFont" color="0xffd24aff" />
+        <Label id="title" translation="[0, 336]" width="220" height="22" maxLines="1" text=""
+               font="font:SmallBoldSystemFont" color="0xc8c8c8ff" horizAlign="left" />
+        <Label id="year" translation="[0, 358]" width="220" height="18" text=""
+               font="font:SmallestSystemFont" color="0x808080ff" horizAlign="left" />
+    </children>
+</component>

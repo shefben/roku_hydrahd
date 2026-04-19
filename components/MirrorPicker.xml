@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="MirrorPicker" extends="Group">
+    <interface>
+        <field id="args" type="assocarray" onChange="onArgs" />
+        <field id="requestNav" type="assocarray" alwaysNotify="true" />
+        <field id="loading" type="bool" alwaysNotify="true" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/MirrorPicker.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+
+    <children>
+        <Rectangle width="1920" height="1080" color="0x000000d4" />
+
+        <Label id="title" translation="[120, 60]" text="Choose a mirror" font="font:LargeBoldSystemFont" color="0xffffffff" />
+        <Label id="subtitle" translation="[120, 100]" text="" font="font:MediumSystemFont" color="0xb8b8b8ff" />
+
+        <MarkupGrid id="mirrorGrid"
+                    translation="[120, 170]"
+                    itemSize="[420, 100]"
+                    numColumns="4"
+                    numRows="6"
+                    itemSpacing="[20, 16]"
+                    drawFocusFeedback="true"
+                    drawFocusFeedbackOnTop="true" />
+
+        <Label id="status" translation="[120, 980]" text="" font="font:SmallSystemFont" color="0xffd24aff" />
+        <Label id="hint" translation="[120, 1020]" text="OK to play - < to go back - ^v to change quality after playback starts"
+               font="font:SmallestSystemFont" color="0x808080ff" />
+    </children>
+</component>

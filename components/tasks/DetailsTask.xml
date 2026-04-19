@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="DetailsTask" extends="Task">
+    <interface>
+        <field id="kind" type="string" />
+        <field id="id" type="string" />
+        <field id="href" type="string" />
+        <field id="result" type="assocarray" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/tasks/DetailsTask.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/HydraApi.brs" />
+</component>

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="PlayerView" extends="Group">
+    <interface>
+        <field id="args" type="assocarray" onChange="onArgs" />
+        <field id="requestNav" type="assocarray" alwaysNotify="true" />
+        <field id="loading" type="bool" alwaysNotify="true" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/PlayerView.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+
+    <children>
+        <Video id="video" width="1920" height="1080" enableUI="true" enableTrickPlay="true" />
+
+        <Rectangle id="overlayBg" width="1920" height="1080" color="0x000000aa" visible="false" />
+
+        <LayoutGroup id="overlay" translation="[120, 120]" layoutDirection="vert" itemSpacings="[18]" visible="false">
+            <Label id="title" text="" font="font:LargeBoldSystemFont" color="0xffffffff" width="1680" maxLines="1" />
+            <Label id="subtitle" text="" font="font:MediumSystemFont" color="0xc8c8c8ff" width="1680" maxLines="1" />
+
+            <ButtonGroup id="actionBar" layoutDirection="horiz" itemSpacings="[20]" minWidth="1680">
+                <Button id="resumeBtn" text="Resume" minWidth="180" />
+                <Button id="qualityBtn" text="Quality" minWidth="180" />
+                <Button id="ccBtn" text="Subtitles" minWidth="180" />
+                <Button id="ccStyleBtn" text="CC Settings" minWidth="220" />
+                <Button id="audioBtn" text="Audio" minWidth="180" />
+                <Button id="stopBtn" text="Stop" minWidth="160" />
+            </ButtonGroup>
+
+            <Label id="status" text="" font="font:SmallSystemFont" color="0xffd24aff" width="1680" maxLines="2" />
+
+            <Group id="qualityPanel" visible="false">
+                <Label text="Pick a quality - up arrow returns to toolbar" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                <LabelList id="qualityRow" translation="[0, 36]" itemSize="[420, 48]" numRows="6" drawFocusFeedback="true" />
+            </Group>
+
+            <Group id="ccPanel" visible="false">
+                <Label text="Pick a subtitle track - up arrow returns to toolbar" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                <LabelList id="ccRow" translation="[0, 36]" itemSize="[520, 48]" numRows="8" drawFocusFeedback="true" />
+            </Group>
+
+            <Group id="ccStylePanel" visible="false">
+                <Label text="Caption Style - up arrow returns to toolbar" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                <LabelList id="ccStyleRow" translation="[0, 36]" itemSize="[420, 48]" numRows="9" drawFocusFeedback="true" />
+            </Group>
+
+            <Group id="audioPanel" visible="false">
+                <Label text="Pick an audio track - up arrow returns to toolbar" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                <LabelList id="audioRow" translation="[0, 36]" itemSize="[420, 48]" numRows="6" drawFocusFeedback="true" />
+            </Group>
+        </LayoutGroup>
+    </children>
+</component>

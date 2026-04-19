@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="ServersTask" extends="Task">
+    <interface>
+        <field id="kind" type="string" />
+        <field id="imdb" type="string" />
+        <field id="tmdb" type="string" />
+        <field id="refer" type="string" />
+        <field id="season" type="integer" value="0" />
+        <field id="episode" type="integer" value="0" />
+        <field id="slug" type="string" />
+        <field id="result" type="assocarray" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/tasks/ServersTask.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/HydraApi.brs" />
+</component>

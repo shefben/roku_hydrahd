@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="EpisodeItem" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="onContent" />
+        <field id="focusPercent" type="float" onChange="onFocus" />
+        <field id="width" type="float" value="420" />
+        <field id="height" type="float" value="130" />
+    </interface>
+    <script type="text/brightscript">
+        <![CDATA[
+        sub init()
+            m.bg = m.top.findNode("bg")
+            m.title = m.top.findNode("title")
+            m.subtitle = m.top.findNode("subtitle")
+            m.epnum = m.top.findNode("epnum")
+        end sub
+        sub onContent()
+            c = m.top.itemContent
+            if c = invalid then return
+            m.title.text = c.title
+            m.subtitle.text = c.shortDescriptionLine1
+            m.epnum.text = c.shortDescriptionLine2
+        end sub
+        sub onFocus()
+            f = m.top.focusPercent
+            if f >= 0.5 then
+                m.bg.color = "0x202020ff"
+                m.title.color = "0xff2424ff"
+            else
+                m.bg.color = "0x101010ff"
+                m.title.color = "0xffffffff"
+            end if
+        end sub
+        ]]>
+    </script>
+    <children>
+        <Rectangle id="bg" width="420" height="130" color="0x101010ff" />
+        <Label id="epnum" translation="[16, 14]" text="" font="font:SmallBoldSystemFont" color="0xff8a8aff" />
+        <Label id="title" translation="[16, 40]" width="388" maxLines="2" text="" font="font:MediumBoldSystemFont" color="0xffffffff" />
+        <Label id="subtitle" translation="[16, 96]" width="388" maxLines="1" text="" font="font:SmallSystemFont" color="0x8a8a8aff" />
+    </children>
+</component>

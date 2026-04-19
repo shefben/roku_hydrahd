@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="MainScene" extends="Scene">
+    <interface>
+        <field id="deepLink" type="assocarray" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+
+    <children>
+        <Rectangle id="bg" color="0x0a0a0aff" width="1920" height="1080" />
+
+        <LayoutGroup id="topBar" translation="[60, 30]" layoutDirection="horiz" itemSpacings="[20]" vertAlignment="center">
+            <Label id="logo" text="HydraHD" font="font:LargeBoldSystemFont" color="0xff2424ff" />
+            <Button id="navHome" text="Home" minWidth="120" />
+            <Button id="navMovies" text="Movies" minWidth="140" />
+            <Button id="navTv" text="TV Shows" minWidth="160" />
+            <Button id="navTrending" text="Trending" minWidth="160" />
+            <Button id="navSearch" text="Search" minWidth="140" />
+            <Button id="navSettings" text="Settings" minWidth="160" />
+        </LayoutGroup>
+
+        <Group id="contentHost" translation="[0, 110]" />
+
+        <Label id="hint" translation="[60, 1030]"
+               text="OK to select  -  BACK to go back  -  UP from content for menu  -  OPTIONS for Settings"
+               font="font:SmallestSystemFont" color="0x808080ff" />
+
+        <Rectangle id="loadingBg" visible="false" color="0x000000aa" width="1920" height="1080" />
+        <LayoutGroup id="loadingGroup" visible="false" translation="[760, 500]" layoutDirection="vert" horizAlignment="center" itemSpacings="[20]">
+            <Rectangle width="400" height="6" color="0xff2424ff" />
+            <Label id="loadingText" text="Loading..." font="font:MediumBoldSystemFont" color="0xffffffff" />
+        </LayoutGroup>
+    </children>
+</component>

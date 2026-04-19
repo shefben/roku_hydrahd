@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="HomeView" extends="Group">
+    <interface>
+        <field id="args" type="assocarray" />
+        <field id="requestNav" type="assocarray" alwaysNotify="true" />
+        <field id="loading" type="bool" alwaysNotify="true" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/HomeView.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+
+    <children>
+        <RowList id="rows"
+                 translation="[60, 20]"
+                 itemSize="[1800, 420]"
+                 numRows="2"
+                 rowItemSize="[[220, 380]]"
+                 rowItemSpacing="[[20, 0]]"
+                 rowSpacings="[40]"
+                 rowFocusAnimationStyle="fixedFocusWrap"
+                 vertFocusAnimationStyle="floatingFocus"
+                 showRowLabel="[true]"
+                 showRowCounter="[false]"
+                 rowLabelOffset="[[0, 0]]"
+                 rowLabelFont="font:LargeBoldSystemFont"
+                 rowLabelColor="0xffffffff"
+                 focusXOffset="0" />
+
+        <Label id="empty" translation="[60, 400]" text="No content. Pull-to-refresh by pressing OK."
+               font="font:MediumSystemFont" color="0x808080ff" visible="false" />
+    </children>
+</component>

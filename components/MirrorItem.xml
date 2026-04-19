@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="MirrorItem" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="onContent" />
+        <field id="focusPercent" type="float" onChange="onFocus" />
+        <field id="width" type="float" value="420" />
+        <field id="height" type="float" value="100" />
+    </interface>
+    <script type="text/brightscript">
+        <![CDATA[
+        sub init()
+            m.bg = m.top.findNode("bg")
+            m.title = m.top.findNode("title")
+            m.host = m.top.findNode("host")
+            m.qual = m.top.findNode("qual")
+            m.badge = m.top.findNode("badge")
+            m.badgeBg = m.top.findNode("badgeBg")
+        end sub
+        sub onContent()
+            c = m.top.itemContent
+            if c = invalid then return
+            m.title.text = c.title
+            m.host.text = c.shortDescriptionLine1
+            m.qual.text = c.shortDescriptionLine2
+            isPremium = c.releaseDate = "premium"
+            m.badge.text = "PRO"
+            m.badge.visible = isPremium
+            m.badgeBg.visible = isPremium
+        end sub
+        sub onFocus()
+            f = m.top.focusPercent
+            if f >= 0.5 then
+                m.bg.color = "0xff2424ff"
+                m.title.color = "0xffffffff"
+            else
+                m.bg.color = "0x141414ff"
+                m.title.color = "0xeeeeeeff"
+            end if
+        end sub
+        ]]>
+    </script>
+    <children>
+        <Rectangle id="bg" width="420" height="100" color="0x141414ff" />
+        <Label id="title" translation="[16, 14]" width="388" maxLines="1" text="" font="font:MediumBoldSystemFont" color="0xeeeeeeff" />
+        <Label id="host" translation="[16, 50]" width="288" maxLines="1" text="" font="font:SmallSystemFont" color="0x9a9a9aff" />
+        <Label id="qual" translation="[16, 72]" width="288" maxLines="1" text="" font="font:SmallSystemFont" color="0xff8a8aff" />
+        <Rectangle id="badgeBg" translation="[358, 48]" width="50" height="22" color="0xb88a00ff" visible="false" />
+        <Label id="badge" translation="[362, 50]" text="" font="font:SmallBoldSystemFont" color="0xffffffff" visible="false" />
+    </children>
+</component>
