@@ -304,16 +304,31 @@ function HA_ParseSeasons(html as String) as Object
     matches = epRe.matchAll(html)
     if matches = invalid then return seasons
 
+    dateRe = CreateObject("roRegex", "(\d{4}-\d{2}-\d{2})", "")
     bySeason = {}
     for each mt in matches
         slug = mt[1]
         s = mt[2].ToInt()
         e = mt[3].ToInt()
-        name = U_Trim(U_HtmlDecode(U_StripTags(mt[4])))
-        if name = "" then name = "Episode " + e.ToStr()
+        raw = U_Trim(U_HtmlDecode(U_StripTags(mt[4])))
+        ' Hydrahd packs the airdate into the same span as the title:
+        '   "1997-08-13 - Cartman Gets an Anal Probe"
+        airDate = ""
+        title = raw
+        dm = dateRe.match(raw)
+        if dm <> invalid and dm.Count() >= 2 then
+            airDate = dm[1]
+            ' Strip "<date> -" prefix
+            stripRe = CreateObject("roRegex", "^\d{4}-\d{2}-\d{2}\s*-\s*", "")
+            title = U_Trim(stripRe.replace(raw, ""))
+        end if
+        if title = "" then title = "Episode " + e.ToStr()
         key = "s" + s.ToStr()
         if not bySeason.DoesExist(key) then bySeason[key] = []
-        bySeason[key].Push({ slug: slug, season: s, episode: e, name: name })
+        bySeason[key].Push({
+            slug: slug, season: s, episode: e,
+            name: title, airDate: airDate
+        })
     end for
 
     sortable = []

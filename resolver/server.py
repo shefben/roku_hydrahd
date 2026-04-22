@@ -17,22 +17,39 @@ Then in the Roku channel Settings > Stream Resolver URL, set
 http://<this-machine-ip>:8787
 
 Implemented providers (working as of 2026-04):
-  * vidsrc.xyz   — full chain through cloudnestra rcpvip / prorcp
+  * vidsrc.xyz / .in / .pm / .io / .net / vsembed.ru — full chain through
+                   cloudnestra rcpvip / prorcp
   * cloudnestra  — direct rcpvip / prorcp pages
-  * 2embed.cc    — chain through streamsrcs.2embed.cc swish → lookmovie2.skin
+  * vidsrc.cc    — /api/episode/{id}/[s/e/]servers + /api/source/{hash}
+                   JSON chain (independent of the cloudnestra Turnstile
+                   gate — works when vidsrc.xyz is challenged)
+  * vidrock.net / vidsrc.vip — /api/movie/{tmdb} + /api/tv/{tmdb}/{s}/{e}
+                   JSON chain (vidsrc.vip is just a vidrock shell)
+  * 2embed.cc / .org — chain through streamsrcs.2embed.cc swish →
+                   lookmovie2.skin
   * lookmovie2.skin — direct (jwplayer eval-packed source)
+  * moviesapi.club / .to — iframe chain → vidora.stream / ww*.moviesapi.to
+                   → JWPlayer eval-packed
+  * vidora.stream — generic JWPlayer with eval(p,a,c,k,e,d) unpack
+  * autoembed.cc / player.autoembed.cc — iframe chain (usually lands on
+                   vidsrc.xyz; covered through follow_known_iframes)
   * xpass.top    — direct .m3u8 from /mdata/{hash}/{n}/playlist.json,
                    plus subtitle search via sub.wyzie.io
   * generic      — best-effort .m3u8 / .mp4 scrape for everything else
 
-Stub providers (need cloudflare bypass, AES decryption, or JS execution):
-  * vidsrc.cc        — eval-packed embed.min.js + obfuscated source endpoint
+Coverage net: every other host falls through to the TMDB-id fallback
+chain (`fallback_via_known_providers`) which retries the same content
+through xpass, vidsrc.cc, vidrock, moviesapi, vidsrc.xyz mirrors,
+2embed, and autoembed in sequence — so unsupported mirrors still play
+as long as the title is on at least one of the working backends.
+
+Stub providers (need cloudflare bypass, AES decryption, or JS execution
+that we can't do from a plain urllib client):
   * vidfast.pro      — encrypted player bundle
   * videasy.net      — encrypted player bundle
-  * vidrock.net      — Cloudflare-protected /api/movie endpoint
-  * vidking.net      — videasy-derived player
+  * vidking.net      — videasy-derived player (lazy-loaded chunk)
   * primesrc.me      — /api/v1/s catalog works, /api/v1/l blocked by CF
-  * embed.su         — DNS not resolvable from test environment
+  * embed.su         — DNS-blocked from many test environments
   * peachify.top     — heavy JS player
   * embedmaster.link — pako/AES-encrypted player payload
   * vidup.to         — heavy JS bundle
@@ -41,9 +58,6 @@ Stub providers (need cloudflare bypass, AES decryption, or JS execution):
   * airflix1.com     — chains to brightpathsignals.com (AES player)
   * frembed.bond     — /api/films catalog works, links redirect to
                        VOE / uqload / divxplayer (each needs own resolver)
-  * moviesapi.club   — /api/movie returns flixcdn URL with AES-encrypted
-                       /api/v1/info endpoint
-  * autoembed.cc     — DNS broken; autoembed.co iframes vidsrc.xyz (handled)
 """
 
 from __future__ import annotations
@@ -641,6 +655,383 @@ def _fetch_xpass_subs(html: str) -> list[dict[str, Any]]:
     return subs
 
 
+def resolve_jwplayer_page(html: str, page_url: str,
+                           refer: str = "") -> dict[str, Any] | None:
+    """Generic JWPlayer / Playerjs resolver.
+
+    Many pirate embeds (vidora.stream, xupload, streamtape mirrors, etc.)
+    are minimal pages around a JWPlayer setup. The stream URL ends up in:
+      * jwplayer().setup({file: "..."})
+      * sources: [{file: "..."}]
+      * an eval(p,a,c,k,e,d) packed wrapper around either of those
+    Try each shape, then fall back to scraping the raw HTML for the first
+    .m3u8 / .mp4 we can spot.
+    """
+    if not html:
+        return None
+    candidates: list[tuple[str, str]] = []   # (url, fmt)
+
+    def consume(text: str) -> None:
+        for pat in (
+            r'file\s*:\s*[\'"]([^\'"]{8,})[\'"]',
+            r'source\s*:\s*[\'"]([^\'"]{8,})[\'"]',
+            r'src\s*:\s*[\'"]([^\'"]{8,}\.(?:m3u8|mp4)[^\'"]*)[\'"]',
+            r'playUrl\s*:\s*[\'"]([^\'"]{8,})[\'"]',
+        ):
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                u = m.group(1).replace("\\/", "/")
+                fmt = "hls" if ".m3u8" in u else ("mp4" if ".mp4" in u else "hls")
+                candidates.append((u, fmt))
+        m = HLS_RE.search(text)
+        if m:
+            candidates.append((m.group(0), "hls"))
+        m = MP4_RE.search(text)
+        if m:
+            candidates.append((m.group(0), "mp4"))
+
+    consume(html)
+    packed = re.search(r"eval\(function\(p,a,c,k,e,d\)[\s\S]+?</script>", html)
+    if packed:
+        unpacked = unpack_packed(packed.group(0))
+        if unpacked:
+            consume(unpacked)
+
+    seen: set[str] = set()
+    for url, fmt in candidates:
+        u = absolute(url, page_url)
+        if u in seen:
+            continue
+        seen.add(u)
+        try:
+            text, _, _ = fetch(u, {"Referer": refer or page_url})
+            if fmt == "hls" and not text.startswith("#EXTM3U"):
+                continue
+        except Exception:
+            continue
+        return make_result(u, refer or page_url, html, fmt)
+    return None
+
+
+# A best-effort registry mapping host substrings to the providers we
+# support. Built lazily because the actual resolvers are defined below.
+_IFRAME_FOLLOW_HOSTS: tuple[str, ...] = (
+    "vidsrc.xyz", "vidsrc.in", "vidsrc.pm", "vidsrc.io", "vidsrc.net",
+    "vsembed.ru", "cloudnestra.com", "2embed.cc", "2embed.org",
+    "lookmovie2.skin", "play.xpass.top", "xpass.top", "vidsrc.cc",
+    "vidrock.net", "vidsrc.vip", "moviesapi.club", "moviesapi.to",
+    "vidora.stream", "autoembed.cc",
+)
+
+
+def follow_known_iframes(html: str, page_url: str, refer: str,
+                          depth: int = 0) -> dict[str, Any] | None:
+    """Walk every <iframe src=...> in the HTML, dispatch each one back
+    through the provider table, and return the first playable result.
+
+    This single helper is what makes "moviesapi.club -> ww2.moviesapi.to
+    -> vidora.stream" and "autoembed.cc -> vidsrc.xyz" work without
+    bespoke chain code per provider.
+    """
+    if depth >= 3 or not html:
+        return None
+    iframes = re.findall(
+        r'<iframe[^>]+(?:data-src|src)=["\']([^"\']+)["\']', html, re.I,
+    )
+    seen: set[str] = set()
+    for src in iframes:
+        if not src or src.startswith(("#", "javascript:", "about:")):
+            continue
+        url = absolute(src.replace("&amp;", "&"), page_url)
+        if url in seen:
+            continue
+        seen.add(url)
+        host = host_of(url)
+        if not any(needle in host for needle in _IFRAME_FOLLOW_HOSTS):
+            # Try a generic JWPlayer scrape — many no-name iframes
+            # are just thin wrappers around a Playerjs config.
+            try:
+                ihtml, _, ifinal = fetch(url, {"Referer": refer or page_url})
+            except Exception:
+                continue
+            if not ihtml:
+                continue
+            res = resolve_jwplayer_page(ihtml, ifinal, page_url)
+            if res:
+                return res
+            # Recurse one more level into nested iframes.
+            res = follow_known_iframes(ihtml, ifinal, page_url, depth + 1)
+            if res:
+                return res
+            continue
+        for needle, fn in PROVIDERS:
+            if needle in host:
+                try:
+                    res = fn(url, page_url)
+                except Exception as exc:  # noqa: BLE001
+                    LOG.debug("iframe provider %s raised: %s", needle, exc)
+                    res = None
+                if res and res.get("url"):
+                    return res
+                break
+    return None
+
+
+def resolve_vidsrc_cc(embed_url: str, refer: str) -> dict[str, Any] | None:
+    """vidsrc.cc /v2/embed/{movie|tv}/{tmdb}[/{s}/{e}].
+
+    The page itself is Cloudflare-protected and useless to scrape, but
+    the player has a stable JSON API:
+      GET /api/episode/{tmdb}/servers           (movies)
+      GET /api/episode/{tmdb}/{s}/{e}/servers   (tv)
+        -> { "data": [ { "name": "...", "hash": "..." }, ... ] }
+      GET /api/source/{hash}
+        -> { "success": true,
+             "data": { "stream": "https://...m3u8",
+                       "subtitles": [ { "file":..., "label":..., "language":... }, ... ] } }
+    The endpoints accept (and require, depending on the day) a Referer
+    matching the embed origin and a same-site fetch UA.
+    """
+    parsed = urlparse.urlparse(embed_url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    pmatch = re.search(
+        r"/(?:v2/)?embed/(movie|tv)/(\d+|tt\d+)(?:/(\d+)/(\d+))?",
+        parsed.path,
+    )
+    if not pmatch:
+        return None
+    kind = pmatch.group(1)
+    cid = pmatch.group(2)
+    season = pmatch.group(3)
+    episode = pmatch.group(4)
+
+    if kind == "tv" and season and episode:
+        servers_url = f"{origin}/api/episode/{cid}/{season}/{episode}/servers"
+    else:
+        servers_url = f"{origin}/api/episode/{cid}/servers"
+
+    api_headers = {
+        "Referer": embed_url,
+        "Origin": origin,
+        "Accept": "application/json, text/plain, */*",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+    try:
+        text, _, _ = fetch(servers_url, api_headers)
+    except Exception as exc:  # noqa: BLE001
+        LOG.debug("vidsrc.cc servers fetch failed: %s", exc)
+        return None
+    if not text:
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+    servers = payload.get("data") or payload.get("servers") or []
+    if not isinstance(servers, list):
+        return None
+
+    for srv in servers:
+        if not isinstance(srv, dict):
+            continue
+        srv_hash = srv.get("hash") or srv.get("data_id") or srv.get("id")
+        if not srv_hash:
+            continue
+        source_url = f"{origin}/api/source/{srv_hash}"
+        try:
+            stext, _, _ = fetch(source_url, api_headers)
+        except Exception:
+            continue
+        try:
+            sdata = json.loads(stext)
+        except json.JSONDecodeError:
+            continue
+        data = sdata.get("data") if isinstance(sdata, dict) else None
+        if not isinstance(data, dict):
+            data = sdata if isinstance(sdata, dict) else {}
+        stream = (data.get("stream") or data.get("source")
+                  or data.get("file") or data.get("url"))
+        if isinstance(stream, list) and stream:
+            stream = stream[0].get("file") if isinstance(stream[0], dict) else stream[0]
+        if not stream:
+            continue
+        subs: list[dict[str, Any]] = []
+        for s in (data.get("subtitles") or data.get("captions") or []):
+            if not isinstance(s, dict):
+                continue
+            url = s.get("file") or s.get("url") or s.get("src")
+            if not url:
+                continue
+            subs.append({
+                "url": url,
+                "language": (s.get("language") or s.get("lang")
+                             or s.get("label") or "en").lower()[:2],
+                "name": s.get("label") or s.get("language") or "Subtitles",
+            })
+        fmt = "hls" if ".m3u8" in stream else "mp4"
+        result = make_result(stream, embed_url, "", fmt)
+        if not result:
+            continue
+        if subs:
+            result["subtitles"] = subs
+        srv_name = srv.get("name", "?")
+        LOG.info("vidsrc.cc resolved via %s", srv_name)
+        return result
+    return None
+
+
+def resolve_moviesapi(embed_url: str, refer: str) -> dict[str, Any] | None:
+    """moviesapi.club / moviesapi.to /movie/{tmdb} or /tv/{tmdb}-{s}-{e}.
+
+    The page just iframes ww2.moviesapi.to which in turn iframes a real
+    player (vidora.stream, ww1, etc.). Walk the iframe chain and let the
+    generic JWPlayer / known-provider handlers do the real work.
+    """
+    html, _, final = fetch(
+        embed_url,
+        {"Referer": refer or "https://hydrahd.ru/"},
+    )
+    if not html:
+        return None
+    res = follow_known_iframes(html, final, refer or final)
+    if res:
+        return res
+    # Some episodes embed the player URL directly.
+    return resolve_jwplayer_page(html, final, refer or final)
+
+
+def resolve_vidora(embed_url: str, refer: str) -> dict[str, Any] | None:
+    """vidora.stream / ww*.moviesapi.* — JWPlayer with eval(p,a,c,k,e,d)."""
+    html, _, final = fetch(embed_url, {"Referer": refer or "https://moviesapi.to/"})
+    if not html:
+        return None
+    return resolve_jwplayer_page(html, final, refer or final)
+
+
+def resolve_vidrock(embed_url: str, refer: str) -> dict[str, Any] | None:
+    """vidrock.net / vidsrc.vip — Cloudflare-fronted SPA with a JSON API.
+
+    Documented endpoint shape:
+      POST /api/movie/{tmdb}      (movies)
+      POST /api/tv/{tmdb}/{s}/{e} (tv)
+    Returns either {sources:[{file,..}],subtitle:[...]} or a base64-
+    encoded payload that decodes to the same structure.
+    """
+    parsed = urlparse.urlparse(embed_url)
+    pmatch = re.search(
+        r"/embed/(movie|tv)/(\d+|tt\d+)(?:/(\d+)/(\d+))?",
+        parsed.path,
+    )
+    if not pmatch:
+        return None
+    kind, cid, season, episode = pmatch.groups()
+
+    # vidsrc.vip is just a thin shell that redirects to vidrock — make
+    # sure we hit vidrock directly so the API origin matches.
+    api_origin = "https://vidrock.net"
+    if kind == "tv" and season and episode:
+        api_url = f"{api_origin}/api/tv/{cid}/{season}/{episode}"
+    else:
+        api_url = f"{api_origin}/api/movie/{cid}"
+
+    headers = {
+        "Referer": f"{api_origin}/embed/{kind}/{cid}",
+        "Origin": api_origin,
+        "Accept": "application/json, text/plain, */*",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+    try:
+        text, _, _ = fetch(api_url, headers)
+    except Exception as exc:  # noqa: BLE001
+        LOG.debug("vidrock api fetch failed: %s", exc)
+        return None
+    if not text:
+        return None
+
+    payload: Any = None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        # Some deployments return base64-encoded JSON in plain text.
+        try:
+            decoded = base64_decode(text.strip())
+            if decoded:
+                payload = json.loads(decoded)
+        except Exception:
+            pass
+    if not isinstance(payload, dict):
+        return None
+
+    # Walk the response for the first stream URL we recognize.
+    streams: list[str] = []
+    def walk(obj: Any) -> None:
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if isinstance(v, str) and (".m3u8" in v or ".mp4" in v):
+                    streams.append(v)
+                else:
+                    walk(v)
+        elif isinstance(obj, list):
+            for it in obj:
+                walk(it)
+    walk(payload)
+    if not streams:
+        return None
+
+    subs: list[dict[str, Any]] = []
+    raw_subs = (payload.get("subtitle") or payload.get("subtitles")
+                or payload.get("captions") or [])
+    if isinstance(raw_subs, list):
+        for s in raw_subs:
+            if not isinstance(s, dict):
+                continue
+            url = s.get("file") or s.get("url")
+            if not url:
+                continue
+            subs.append({
+                "url": url,
+                "language": (s.get("language") or s.get("lang")
+                             or "en").lower()[:2],
+                "name": s.get("label") or s.get("language") or "Subtitles",
+            })
+
+    stream = streams[0]
+    fmt = "hls" if ".m3u8" in stream else "mp4"
+    result = make_result(stream, embed_url, "", fmt)
+    if not result:
+        return None
+    if subs:
+        result["subtitles"] = subs
+    LOG.info("vidrock resolved via %s", api_url)
+    return result
+
+
+def base64_decode(s: str) -> str:
+    import base64 as _b64
+    pad = "=" * (-len(s) % 4)
+    try:
+        return _b64.b64decode(s + pad).decode("utf-8", "replace")
+    except Exception:
+        return ""
+
+
+def resolve_autoembed(embed_url: str, refer: str) -> dict[str, Any] | None:
+    """autoembed.cc / player.autoembed.cc — typically iframes vidsrc.xyz
+    or one of its mirrors. Walk the iframe chain through our existing
+    provider table.
+    """
+    html, _, final = fetch(embed_url, {"Referer": refer or "https://hydrahd.ru/"})
+    if not html:
+        return None
+    res = follow_known_iframes(html, final, refer or final)
+    if res:
+        return res
+    return resolve_jwplayer_page(html, final, refer or final)
+
+
 def stub_provider(name: str) -> Callable[[str, str], dict[str, Any] | None]:
     def _fn(embed_url: str, refer: str) -> dict[str, Any] | None:
         LOG.info("provider %s not implemented for %s", name, embed_url)
@@ -657,10 +1048,18 @@ PROVIDERS: list[tuple[str, Callable[[str, str], dict[str, Any] | None]]] = [
     ("vidsrc.io",           resolve_vidsrc_xyz),
     ("vidsrc.net",          resolve_vidsrc_xyz),
     ("vsembed.ru",          resolve_vidsrc_xyz),
+    ("vidsrc.cc",           resolve_vidsrc_cc),
+    ("vidsrc.vip",          resolve_vidrock),
+    ("vidrock.net",         resolve_vidrock),
     ("2embed.cc",           resolve_2embed),
     ("2embed.org",          resolve_2embed),
     ("lookmovie2.skin",     resolve_lookmovie),
-    ("vidsrc.cc",           stub_provider("vidsrc.cc")),
+    ("moviesapi.club",      resolve_moviesapi),
+    ("moviesapi.to",        resolve_moviesapi),
+    ("vidora.stream",       resolve_vidora),
+    ("autoembed.cc",        resolve_autoembed),
+    ("xpass.top",           resolve_xpass),
+    ("play.xpass.top",      resolve_xpass),
     ("vidfast.pro",         stub_provider("vidfast.pro")),
     ("videasy.net",         stub_provider("videasy.net")),
     ("embed.su",            stub_provider("embed.su")),
@@ -668,16 +1067,11 @@ PROVIDERS: list[tuple[str, Callable[[str, str], dict[str, Any] | None]]] = [
     ("primesrc.me",         stub_provider("primesrc.me")),
     ("vidup.to",            stub_provider("vidup.to")),
     ("vidking.net",         stub_provider("vidking.net")),
-    ("vidrock.net",         stub_provider("vidrock.net")),
     ("embedmaster.link",    stub_provider("embedmaster.link")),
-    ("moviesapi.club",      stub_provider("moviesapi.club")),
     ("airflix1.com",        stub_provider("airflix1.com")),
-    ("xpass.top",           resolve_xpass),
-    ("play.xpass.top",      resolve_xpass),
     ("ythd.org",            stub_provider("ythd.org")),
     ("kllamrd.org",         stub_provider("kllamrd.org")),
     ("frembed.bond",        stub_provider("frembed.bond")),
-    ("autoembed.cc",        stub_provider("autoembed.cc")),
 ]
 
 
@@ -849,6 +1243,69 @@ def fallback_via_known_providers(ids: dict[str, str],
             candidates.append((
                 "2embed.org", f"https://2embed.org/embed/{tmdb}",
                 resolve_2embed,
+            ))
+
+    # vidsrc.cc — uses its own /api/source/{hash} chain. Independent of
+    # the cloudnestra Turnstile rollout that gates vidsrc.xyz, so often
+    # the only working option for unreleased / new titles.
+    if tmdb:
+        if is_tv:
+            candidates.append((
+                "vidsrc.cc",
+                f"https://vidsrc.cc/v2/embed/tv/{tmdb}/{season}/{episode}",
+                resolve_vidsrc_cc,
+            ))
+        else:
+            candidates.append((
+                "vidsrc.cc",
+                f"https://vidsrc.cc/v2/embed/movie/{tmdb}",
+                resolve_vidsrc_cc,
+            ))
+
+    # vidrock / vidsrc.vip — direct JSON API.
+    if tmdb:
+        if is_tv:
+            candidates.append((
+                "vidrock",
+                f"https://vidrock.net/embed/tv/{tmdb}/{season}/{episode}",
+                resolve_vidrock,
+            ))
+        else:
+            candidates.append((
+                "vidrock",
+                f"https://vidrock.net/embed/movie/{tmdb}",
+                resolve_vidrock,
+            ))
+
+    # moviesapi.club -> ww*.moviesapi.to -> vidora.stream chain.
+    if tmdb:
+        if is_tv:
+            candidates.append((
+                "moviesapi",
+                f"https://moviesapi.club/tv/{tmdb}-{season}-{episode}",
+                resolve_moviesapi,
+            ))
+        else:
+            candidates.append((
+                "moviesapi",
+                f"https://moviesapi.club/movie/{tmdb}",
+                resolve_moviesapi,
+            ))
+
+    # autoembed.cc — usually iframes vidsrc.xyz, but occasionally has
+    # an independent chain. Prefer IMDB id if we have one.
+    if imdb:
+        if is_tv:
+            candidates.append((
+                "autoembed",
+                f"https://player.autoembed.cc/embed/tv/{imdb}/{season}/{episode}",
+                resolve_autoembed,
+            ))
+        else:
+            candidates.append((
+                "autoembed",
+                f"https://player.autoembed.cc/embed/movie/{imdb}",
+                resolve_autoembed,
             ))
 
     seen_urls: set[str] = set()

@@ -16,10 +16,7 @@
             <Group>
                 <Label text="Base URL" font="font:MediumBoldSystemFont" color="0xffffffff" />
                 <Label id="baseUrlValue" translation="[0, 30]" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" width="1500" />
-                <LayoutGroup translation="[0, 60]" layoutDirection="horiz" itemSpacings="[12]">
-                    <Button id="useDefaultBase" text="Use hydrahd.ru" minWidth="220" />
-                    <Button id="editBase" text="Edit URL" minWidth="160" />
-                </LayoutGroup>
+                <ButtonGroup id="baseRow" translation="[0, 60]" layoutDirection="horiz" itemSpacings="[12]" minWidth="220" />
             </Group>
 
             <Group>
@@ -28,31 +25,16 @@
                        text="HydraHD uses third-party iframe embeds. Roku can only play direct video URLs (HLS / MP4). To enable real playback for those mirrors, run the Python resolver in resolver/ on a machine on your network and put its URL here, e.g. http://192.168.1.50:8787"
                        font="font:SmallSystemFont" color="0x9a9a9aff" />
                 <Label id="resolverValue" translation="[0, 110]" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" />
-                <LayoutGroup translation="[0, 140]" layoutDirection="horiz" itemSpacings="[12]">
-                    <Button id="setResolver" text="Set Resolver..." minWidth="220" />
-                    <Button id="clearResolver" text="Clear" minWidth="140" />
-                </LayoutGroup>
+                <ButtonGroup id="resolverRow" translation="[0, 140]" layoutDirection="horiz" itemSpacings="[12]" minWidth="220" />
             </Group>
 
             <Group>
                 <Label text="Captions" font="font:MediumBoldSystemFont" color="0xffffffff" />
                 <Label translation="[0, 30]" text="Choose default size, text color, and background - applied to every video."
                        font="font:SmallSystemFont" color="0x9a9a9aff" />
-                <LayoutGroup translation="[0, 60]" layoutDirection="horiz" itemSpacings="[12]">
-                    <Button id="ccSizeSmall" text="Text: Small" minWidth="160" />
-                    <Button id="ccSizeMed" text="Text: Medium" minWidth="170" />
-                    <Button id="ccSizeLarge" text="Text: Large" minWidth="170" />
-                </LayoutGroup>
-                <LayoutGroup translation="[0, 110]" layoutDirection="horiz" itemSpacings="[12]">
-                    <Button id="ccColorWhite" text="Text: White" minWidth="160" />
-                    <Button id="ccColorYellow" text="Text: Yellow" minWidth="170" />
-                    <Button id="ccColorCyan" text="Text: Cyan" minWidth="170" />
-                </LayoutGroup>
-                <LayoutGroup translation="[0, 160]" layoutDirection="horiz" itemSpacings="[12]">
-                    <Button id="ccBgBlack" text="BG: Black" minWidth="160" />
-                    <Button id="ccBgSemi" text="BG: Semi-Transparent" minWidth="240" />
-                    <Button id="ccBgNone" text="BG: None" minWidth="160" />
-                </LayoutGroup>
+                <ButtonGroup id="ccSizeRow" translation="[0, 60]" layoutDirection="horiz" itemSpacings="[12]" minWidth="170" />
+                <ButtonGroup id="ccColorRow" translation="[0, 110]" layoutDirection="horiz" itemSpacings="[12]" minWidth="170" />
+                <ButtonGroup id="ccBgRow" translation="[0, 160]" layoutDirection="horiz" itemSpacings="[12]" minWidth="240" />
                 <Rectangle id="ccPreviewBg" translation="[-8, 218]" width="780" height="32" color="0x000000aa" />
                 <Label id="ccPreview" translation="[0, 220]" text="The quick brown fox jumps over the lazy dog."
                        font="font:MediumBoldSystemFont" color="0xffffffff" />
@@ -64,10 +46,7 @@
             <LayoutGroup translation="[300, 200]" layoutDirection="vert" itemSpacings="[20]">
                 <Label id="urlEditTitle" text="" font="font:LargeBoldSystemFont" color="0xffffffff" />
                 <Keyboard id="urlKb" />
-                <LayoutGroup layoutDirection="horiz" itemSpacings="[14]">
-                    <Button id="urlSave" text="Save" minWidth="160" />
-                    <Button id="urlCancel" text="Cancel" minWidth="160" />
-                </LayoutGroup>
+                <ButtonGroup id="urlActionsRow" layoutDirection="horiz" itemSpacings="[14]" minWidth="160" />
             </LayoutGroup>
         </Group>
     </children>

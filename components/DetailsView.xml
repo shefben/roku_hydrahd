@@ -10,41 +10,46 @@
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
 
     <children>
-        <Poster id="backdrop" translation="[0,0]" width="1920" height="700" loadDisplayMode="scaleToFill"
+        <Poster id="backdrop" translation="[0,0]" width="1920" height="540" loadDisplayMode="scaleToFill"
                 opacity="0.45" />
-        <Rectangle width="1920" height="700" color="0x0a0a0acc" />
+        <Rectangle width="1920" height="540" color="0x0a0a0acc" />
 
         <LayoutGroup translation="[60, 20]" layoutDirection="horiz" itemSpacings="[40]">
-            <Poster id="poster" width="320" height="475" loadDisplayMode="scaleToZoom"
+            <Poster id="poster" width="280" height="380" loadDisplayMode="scaleToZoom"
                     failedBitmapUri="pkg:/images/placeholder.png" />
-            <LayoutGroup layoutDirection="vert" itemSpacings="[10]" translation="[0, 20]">
-                <Label id="title" text="" font="font:LargeBoldSystemFont" color="0xffffffff" width="1500" maxLines="2" />
+            <LayoutGroup layoutDirection="vert" itemSpacings="[8]" translation="[0, 10]">
+                <Label id="title" text="" font="font:LargeBoldSystemFont" color="0xffffffff" width="1540" maxLines="2" />
                 <Label id="meta" text="" font="font:MediumSystemFont" color="0xb8b8b8ff" />
                 <Label id="genres" text="" font="font:SmallSystemFont" color="0xff8a8aff" />
-                <Label id="overview" text="" font="font:MediumSystemFont" color="0xeeeeeeff" width="1500" wrap="true" maxLines="6" />
-                <Label id="cast" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" width="1500" maxLines="2" />
+                <Label id="overview" text="" font="font:MediumSystemFont" color="0xeeeeeeff" width="1540" wrap="true" maxLines="4" />
+                <Label id="cast" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" width="1540" maxLines="1" />
 
-                <ButtonGroup id="actions" translation="[0, 20]"
+                <ButtonGroup id="actions" translation="[0, 8]"
                              layoutDirection="horiz" itemSpacings="[18]"
                              minWidth="200" />
-                <Label id="status2" text="" font="font:SmallSystemFont" color="0x9a9a9aff" />
+                <Label id="status2" text="" font="font:SmallSystemFont" color="0xffd24aff" width="1540" maxLines="1" />
             </LayoutGroup>
         </LayoutGroup>
 
-        <Group id="seasonGroup" translation="[60, 540]" visible="false">
+        <Group id="seasonGroup" translation="[60, 420]" visible="false">
             <Label id="seasonTitle" text="Seasons" font="font:LargeBoldSystemFont" color="0xffffffff" />
-            <ButtonGroup id="seasonRow" translation="[0, 40]"
-                         layoutDirection="horiz" itemSpacings="[10]" minWidth="140" />
+            <MarkupGrid id="seasonRow" translation="[0, 40]"
+                        itemSize="[170, 60]"
+                        numRows="1"
+                        numColumns="9"
+                        itemSpacing="[10, 0]"
+                        itemComponentName="SeasonChip"
+                        drawFocusFeedback="true"
+                        drawFocusFeedbackOnTop="true" />
             <MarkupGrid id="episodeGrid"
-                        translation="[0, 110]"
-                        itemSize="[420, 130]"
-                        numColumns="4"
+                        translation="[0, 120]"
+                        itemSize="[1750, 130]"
+                        numColumns="1"
                         numRows="3"
-                        itemSpacing="[16, 16]"
+                        itemSpacing="[0, 12]"
+                        vertFocusAnimationStyle="fixedFocusWrap"
                         drawFocusFeedback="true"
                         drawFocusFeedbackOnTop="true" />
         </Group>
-
-        <Label id="status" translation="[60, 1010]" text="" font="font:SmallSystemFont" color="0xffd24aff" />
     </children>
 </component>

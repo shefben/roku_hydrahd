@@ -2,7 +2,6 @@
 
 sub init()
     ' State first.
-    m.seasonButtons = []
     m.activeSeason = 0
     m.detail = invalid
     m.kind = ""
@@ -16,7 +15,8 @@ sub init()
     m.genresNode = m.top.findNode("genres")
     m.overviewNode = m.top.findNode("overview")
     m.castNode = m.top.findNode("cast")
-    m.statusNode = m.top.findNode("status")
+    ' status2 lives inside the top LayoutGroup so it is always on screen.
+    m.statusNode = m.top.findNode("status2")
 
     m.actions = m.top.findNode("actions")
     m.actions.buttons = ["Play", "Choose Mirror"]
@@ -27,7 +27,13 @@ sub init()
     m.epGrid = m.top.findNode("episodeGrid")
     m.epGrid.itemComponentName = "EpisodeItem"
     m.epGrid.observeField("itemSelected", "onEpisodeSelected")
-    m.seasonRow.observeField("buttonSelected", "onSeasonSelected")
+    ' itemFocused fires every time the highlighted season changes (left/right
+    ' on the remote). itemSelected only fires on OK. Observing both lets the
+    ' episode list refresh as the user scrolls and also drops focus into the
+    ' grid when they actually pick a season. The MarkupGrid auto-scrolls
+    ' horizontally when there are more seasons than fit on screen.
+    m.seasonRow.observeField("itemFocused", "onSeasonFocused")
+    m.seasonRow.observeField("itemSelected", "onSeasonSelected")
 
     m.actions.setFocus(true)
 end sub
@@ -35,16 +41,46 @@ end sub
 sub onArgs()
     a = m.top.args
     if a = invalid then return
-    m.kind = a.kind
-    m.id = a.id
-    m.href = a.href
-    if a.title <> invalid then m.titleNode.text = a.title
-    if a.poster <> invalid and a.poster <> "" then
-        m.poster.uri = a.poster
-        m.backdrop.uri = a.poster
+    ' Pull values defensively. ContentNode.contentType is a fixed enum that
+    ' silently drops non-standard values like "tv" / "movie", so a.kind may
+    ' arrive as invalid or an unexpected type. Comparing invalid to a String
+    ' with `=` raises a Type Mismatch on Roku and halts the handler, which
+    ' was making the screen freeze the instant a poster was clicked.
+    m.kind = pickString(a, "kind")
+    m.id = pickString(a, "id")
+    m.href = pickString(a, "href")
+    if m.kind <> "tv" and m.kind <> "movie" then
+        if m.href <> "" and Instr(1, m.href, "/watchseries/") > 0 then
+            m.kind = "tv"
+        else
+            m.kind = "movie"
+        end if
     end if
+    titleStr = pickString(a, "title")
+    if titleStr <> "" then m.titleNode.text = titleStr
+    posterStr = pickString(a, "poster")
+    if posterStr <> "" then
+        m.poster.uri = posterStr
+        m.backdrop.uri = posterStr
+    end if
+    ' Set initial buttons based on detected kind so we don't briefly
+    ' show "Play / Choose Mirror" before the details fetch finishes.
+    if m.kind = "tv" then
+        m.actions.buttons = ["Seasons"]
+    else
+        m.actions.buttons = ["Play", "Choose Mirror"]
+    end if
+    m.actions.setFocus(true)
     fetchDetails()
 end sub
+
+function pickString(aa as Object, key as String) as String
+    if aa = invalid then return ""
+    v = aa[key]
+    if v = invalid then return ""
+    if Type(v) = "String" or Type(v) = "roString" then return v
+    return ""
+end function
 
 sub fetchDetails()
     m.top.loading = true
@@ -109,12 +145,16 @@ sub paintDetail()
         m.backdrop.uri = d.backdrop
     end if
 
-    if d.kind = "tv" then
+    ' Trust the kind we already detected in onArgs - the parsed `d.kind`
+    ' just echoes whichever fetcher was called.
+    if m.kind = "tv" then
         m.actions.buttons = ["Seasons"]
-        if d.seasons.Count() > 0 then
+        if d.seasons <> invalid and d.seasons.Count() > 0 then
             renderSeasons()
             m.seasonGroup.visible = true
         end if
+    else
+        m.actions.buttons = ["Play", "Choose Mirror"]
     end if
     m.actions.setFocus(true)
 end sub
@@ -129,19 +169,27 @@ function joinWithComma(arr as Object) as String
 end function
 
 sub renderSeasons()
-    m.seasonButtons = []
-    labels = []
+    root = createObject("roSGNode", "ContentNode")
     for i = 0 to m.detail.seasons.Count() - 1
-        labels.Push(m.detail.seasons[i].label)
+        ch = root.createChild("ContentNode")
+        ch.title = m.detail.seasons[i].label
     end for
-    m.seasonRow.buttons = labels
-    if labels.Count() > 0 then selectSeason(0)
+    m.seasonRow.content = root
+    if root.getChildCount() > 0 then
+        m.seasonRow.jumpToItem = 0
+        selectSeason(0)
+    end if
 end sub
+
+function seasonCount() as Integer
+    if m.seasonRow.content = invalid then return 0
+    return m.seasonRow.content.getChildCount()
+end function
 
 sub onActionSelected()
     if m.actions.buttonSelected = invalid then return
     idx = m.actions.buttonSelected
-    if m.detail <> invalid and m.detail.kind = "tv" then
+    if m.kind = "tv" then
         ' TV shows have a single "Seasons" button - just focus the season picker.
         onShowSeasons()
         return
@@ -155,16 +203,28 @@ end sub
 
 sub onShowSeasons()
     m.seasonGroup.visible = true
-    if m.seasonRow.buttons <> invalid and m.seasonRow.buttons.Count() > 1 then
+    if seasonCount() > 1 then
         m.seasonRow.setFocus(true)
     else if m.epGrid.content <> invalid then
         m.epGrid.setFocus(true)
     end if
 end sub
 
+sub onSeasonFocused()
+    idx = m.seasonRow.itemFocused
+    if idx = invalid or idx < 0 then return
+    selectSeason(idx)
+end sub
+
 sub onSeasonSelected()
-    if m.seasonRow.buttonSelected = invalid then return
-    selectSeason(m.seasonRow.buttonSelected)
+    idx = m.seasonRow.itemSelected
+    if idx = invalid or idx < 0 then return
+    selectSeason(idx)
+    ' OK on a season jumps focus into the episode list so the user doesn't
+    ' have to fish for the down arrow afterwards.
+    if m.epGrid.content <> invalid and m.epGrid.content.getChildCount() > 0 then
+        m.epGrid.setFocus(true)
+    end if
 end sub
 
 sub selectSeason(idx as Integer)
@@ -172,12 +232,21 @@ sub selectSeason(idx as Integer)
     if idx < 0 or idx >= m.detail.seasons.Count() then return
     m.activeSeason = idx
     s = m.detail.seasons[idx]
+    poster = ""
+    if m.detail.poster <> invalid then poster = m.detail.poster
+    desc = ""
+    if m.detail.description <> invalid then desc = m.detail.description
     root = createObject("roSGNode", "ContentNode")
     for each ep in s.episodes
         cell = root.createChild("ContentNode")
         cell.title = ep.name
-        cell.shortDescriptionLine1 = "Season " + ep.season.ToStr() + " - Episode " + ep.episode.ToStr()
-        cell.shortDescriptionLine2 = "E" + ep.episode.ToStr()
+        cell.shortDescriptionLine2 = "S" + ep.season.ToStr() + " - E" + ep.episode.ToStr()
+        airDate = ""
+        if ep.airDate <> invalid then airDate = ep.airDate
+        cell.shortDescriptionLine1 = airDate
+        cell.description = desc
+        cell.HDPosterUrl = poster
+        cell.SDPosterUrl = poster
         cell.id = ep.slug + "|" + ep.season.ToStr() + "|" + ep.episode.ToStr()
     end for
     m.epGrid.content = root
@@ -260,9 +329,9 @@ end sub
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
     if key = "down" and m.actions.hasFocus() then
-        if m.detail <> invalid and m.detail.kind = "tv" then
+        if m.kind = "tv" then
             m.seasonGroup.visible = true
-            if m.seasonRow.buttons <> invalid and m.seasonRow.buttons.Count() > 1 then
+            if seasonCount() > 1 then
                 m.seasonRow.setFocus(true)
             else if m.epGrid.content <> invalid then
                 m.epGrid.setFocus(true)
@@ -277,7 +346,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         end if
     end if
     if key = "up" and m.epGrid.hasFocus() then
-        if m.seasonRow.buttons <> invalid and m.seasonRow.buttons.Count() > 1 then
+        if seasonCount() > 1 then
             m.seasonRow.setFocus(true)
         else
             m.actions.setFocus(true)

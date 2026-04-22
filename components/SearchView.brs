@@ -105,6 +105,12 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         m.searchBtn.setFocus(true)
         return true
     end if
+    if key = "up" and m.searchBtn.hasFocus() then
+        ' Without this the user gets stuck on the Search button - up would
+        ' otherwise bubble out to MainScene and steal focus to the nav bar.
+        m.kb.setFocus(true)
+        return true
+    end if
     if key = "right" and (m.kb.hasFocus() or m.searchBtn.hasFocus()) then
         if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
             m.grid.setFocus(true)

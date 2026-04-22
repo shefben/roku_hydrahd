@@ -69,13 +69,17 @@ sub onItemSelected()
     if rowContent = invalid then return
     item = rowContent.getChild(colIdx)
     if item = invalid then return
+    href = ""
+    if item.url <> invalid then href = item.url
+    kind = "movie"
+    if href <> "" and Instr(1, href, "/watchseries/") > 0 then kind = "tv"
     payload = {
         action: "open"
         view: "DetailsView"
         args: {
-            kind: item.contentType
+            kind: kind
             id: item.id
-            href: item.url
+            href: href
             title: item.title
             poster: item.HDPosterUrl
         }

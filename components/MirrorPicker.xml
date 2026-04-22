@@ -16,16 +16,17 @@
         <Label id="subtitle" translation="[120, 100]" text="" font="font:MediumSystemFont" color="0xb8b8b8ff" />
 
         <MarkupGrid id="mirrorGrid"
-                    translation="[120, 170]"
+                    translation="[120, 150]"
                     itemSize="[420, 100]"
                     numColumns="4"
                     numRows="6"
                     itemSpacing="[20, 16]"
+                    vertFocusAnimationStyle="fixedFocusWrap"
                     drawFocusFeedback="true"
                     drawFocusFeedbackOnTop="true" />
 
-        <Label id="status" translation="[120, 980]" text="" font="font:SmallSystemFont" color="0xffd24aff" />
-        <Label id="hint" translation="[120, 1020]" text="OK to play - < to go back - ^v to change quality after playback starts"
-               font="font:SmallestSystemFont" color="0x808080ff" />
+        <Label id="status" translation="[120, 860]" text="" font="font:SmallSystemFont" color="0xffd24aff" width="1680" maxLines="1" />
+        <Label id="hint" translation="[120, 910]" text="OK to play  -  BACK to go back  -  Up/Down to scroll mirrors"
+               font="font:SmallestSystemFont" color="0x808080ff" width="1680" maxLines="1" />
     </children>
 </component>
