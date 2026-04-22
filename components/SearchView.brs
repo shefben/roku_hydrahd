@@ -18,6 +18,19 @@ sub init()
     m.timer.duration = 0.6
     m.timer.repeat = false
     m.timer.observeField("fire", "onDebounce")
+
+    ' MainScene.focusActiveChild() runs *after* this init returns and calls
+    ' setFocus(true) on the SearchView root Group, which would yank focus
+    ' off the keyboard and leave the user with arrow keys that do nothing.
+    ' Defer the keyboard focus by one event-loop tick so it sticks.
+    m.focusTimer = createObject("roSGNode", "Timer")
+    m.focusTimer.duration = 0.05
+    m.focusTimer.repeat = false
+    m.focusTimer.observeField("fire", "grabKeyboardFocus")
+    m.focusTimer.control = "start"
+end sub
+
+sub grabKeyboardFocus()
     m.kb.setFocus(true)
 end sub
 
@@ -101,6 +114,15 @@ end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
+    ' Safety net: if focus somehow ends up on the root Group (e.g. focus
+    ' race during view push) any directional key should land on the
+    ' keyboard so the user is never stranded with dead arrows.
+    if not m.kb.hasFocus() and not m.searchBtn.hasFocus() and not m.grid.hasFocus() then
+        if key = "up" or key = "down" or key = "left" or key = "right" or key = "OK" then
+            m.kb.setFocus(true)
+            return true
+        end if
+    end if
     if key = "down" and m.kb.hasFocus() then
         m.searchBtn.setFocus(true)
         return true

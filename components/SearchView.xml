@@ -27,6 +27,7 @@
                             numColumns="5"
                             numRows="2"
                             itemSpacing="[16, 24]"
+                            vertFocusAnimationStyle="fixedFocusWrap"
                             drawFocusFeedback="true"
                             drawFocusFeedbackOnTop="true" />
                 <Label id="empty" translation="[0, 80]" text="" font="font:MediumSystemFont"

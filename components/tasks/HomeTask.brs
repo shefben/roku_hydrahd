@@ -3,24 +3,28 @@ sub init()
 end sub
 
 sub doWork()
-    rows = []
+    ' Pull the actual hydrahd.ru landing page so the order, labels, and
+    ' poster set match what the website shows. HA_FetchHome reads the
+    ' <h3> headers ("Trending", "Latest", "Top Rated", ...) and groups
+    ' the cards underneath each one. Person profile rows like
+    ' "Trending People" are dropped automatically because their cards
+    ' have /person/ hrefs which the parser ignores.
+    rows = HA_FetchHome()
+    if rows = invalid then rows = []
 
-    addRow(rows, "Trending Movies",     HA_FetchPopular(1))
-    addRow(rows, "Trending Series",     HA_FetchTvShowsPopular(1))
-    addRow(rows, "Latest Movies",       HA_FetchMovies(1))
-    addRow(rows, "Latest Series",       HA_FetchTvShows(1))
-    addRow(rows, "Top Rated Movies",    HA_FetchTopRated(1))
-    addRow(rows, "Top Rated Series",    HA_FetchTvShowsTopRated(1))
-
-    m.top.result = { rows: rows }
-end sub
-
-sub addRow(rows as Object, title as String, items as Object)
-    if items = invalid or items.Count() = 0 then return
-    slice = []
-    for i = 0 to 23
-        if i >= items.Count() then exit for
-        slice.Push(items[i])
+    ' Cap each row at 24 cards to keep the home grid responsive.
+    capped = []
+    for each row in rows
+        items = row.items
+        if items <> invalid and items.Count() > 0 then
+            slice = []
+            for i = 0 to 23
+                if i >= items.Count() then exit for
+                slice.Push(items[i])
+            end for
+            capped.Push({ title: row.title, items: slice })
+        end if
     end for
-    rows.Push({ title: title, items: slice })
+
+    m.top.result = { rows: capped }
 end sub
