@@ -98,6 +98,13 @@ function U_StreamFormat(url as String) as String
     return "hls"
 end function
 
+' Default resolver URL baked in at build time by tools/build_zip.bat.
+' Keep the trailing comment marker - the build script searches for it
+' to inject the user's LAN IP without disturbing anything else.
+function U_DefaultResolverUrl() as String
+    return ""  ' build:resolver-url
+end function
+
 function U_PrefDefault(key as String, default as Dynamic) as Dynamic
     reg = CreateObject("roRegistrySection", "HydraHD")
     if reg.Exists(key) then

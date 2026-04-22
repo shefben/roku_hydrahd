@@ -46,7 +46,7 @@ end sub
 
 sub refresh()
     m.baseUrlValue.text = U_PrefDefault("baseUrl", "https://hydrahd.ru")
-    r = U_PrefDefault("resolverUrl", "")
+    r = U_PrefDefault("resolverUrl", U_DefaultResolverUrl())
     if r = "" then r = "(not set - falls back to best-effort scrape)"
     m.resolverValue.text = r
     paintCcPreview()
@@ -65,7 +65,7 @@ end sub
 sub onResolverRowSelected()
     idx = m.resolverRow.buttonSelected
     if idx = 0 then
-        openUrlEditor("resolverUrl", "Edit resolver URL (e.g. http://192.168.1.50:8787)", U_PrefDefault("resolverUrl", ""))
+        openUrlEditor("resolverUrl", "Edit resolver URL (e.g. http://192.168.1.50:8787)", U_PrefDefault("resolverUrl", U_DefaultResolverUrl()))
     else if idx = 1 then
         U_PrefSet("resolverUrl", "")
         refresh()

@@ -29,7 +29,7 @@ sub doWork()
         return
     end if
 
-    resolver = U_PrefDefault("resolverUrl", "")
+    resolver = U_PrefDefault("resolverUrl", U_DefaultResolverUrl())
     if resolver <> "" then
         out = resolveViaService(resolver, embedUrl)
         if out <> invalid and out.url <> "" then
