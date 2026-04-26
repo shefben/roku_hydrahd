@@ -3,12 +3,16 @@
 sub init()
     m.items = []
     m.lastQuery = ""
+    m.resultsMode = false
 
     m.kb = m.top.findNode("kb")
     m.grid = m.top.findNode("grid")
     m.empty = m.top.findNode("empty")
     m.searchBtn = m.top.findNode("searchBtn")
     m.resultTitle = m.top.findNode("resultTitle")
+    m.layoutWrap = m.top.findNode("layoutWrap")
+    m.slideAnim = m.top.findNode("slideAnim")
+    m.slideInterp = m.top.findNode("slideInterp")
     m.kb.text = ""
     m.grid.itemComponentName = "PosterItem"
     m.searchBtn.observeField("buttonSelected", "onSearchClick")
@@ -32,6 +36,22 @@ end sub
 
 sub grabKeyboardFocus()
     m.kb.setFocus(true)
+end sub
+
+sub showResults()
+    if m.resultsMode then return
+    m.resultsMode = true
+    m.slideAnim.control = "stop"
+    m.slideInterp.keyValue = [[0, 0], [-450, 0]]
+    m.slideAnim.control = "start"
+end sub
+
+sub showKeyboard()
+    if not m.resultsMode then return
+    m.resultsMode = false
+    m.slideAnim.control = "stop"
+    m.slideInterp.keyValue = [[-450, 0], [0, 0]]
+    m.slideAnim.control = "start"
 end sub
 
 sub onTextChange()
@@ -120,6 +140,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     if not m.kb.hasFocus() and not m.searchBtn.hasFocus() and not m.grid.hasFocus() then
         if key = "up" or key = "down" or key = "left" or key = "right" or key = "OK" then
             m.kb.setFocus(true)
+            showKeyboard()
             return true
         end if
     end if
@@ -136,11 +157,17 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     if key = "right" and (m.kb.hasFocus() or m.searchBtn.hasFocus()) then
         if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
             m.grid.setFocus(true)
+            showResults()
             return true
         end if
     end if
+    ' Left from the leftmost grid column bubbles up to here (MarkupGrid
+    ' consumes left while moving between columns and only releases it at
+    ' the leftmost edge), so this is the trigger to slide back to the
+    ' keyboard.
     if key = "left" and m.grid.hasFocus() then
         m.kb.setFocus(true)
+        showKeyboard()
         return true
     end if
     return false

@@ -64,7 +64,8 @@ channel will mark the mirror as failed and let the user pick another.
 | vidup.to               | 🚫 stub    | Heavy JS bundle                                        |
 | ythd.org               | 🚫 stub    | webpack-bundled obfuscated player                      |
 | kllamrd.org            | 🚫 stub    | Anti-bot challenge before player loads                 |
-| airflix1.com           | 🚫 stub    | Chains to brightpathsignals.com (AES + WASM player)    |
+| airflix1.com           | ✅ done    | brightpathsignals.com → streamdata.vaplayer.ru/api.php |
+|                        |            | returns master.m3u8 list (no encryption, no token)     |
 | frembed.bond           | 🟡 partial | /api/films catalog works; links redirect to            |
 |                        |            | VOE / uqload / divxplayer (each needs own resolver)    |
 | moviesapi.club         | 🟡 partial | /api/movie returns flixcdn URL with AES-encrypted      |

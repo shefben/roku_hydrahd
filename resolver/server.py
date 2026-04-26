@@ -33,6 +33,9 @@ Implemented providers (working as of 2026-04):
   * vidora.stream — generic JWPlayer with eval(p,a,c,k,e,d) unpack
   * autoembed.cc / player.autoembed.cc — iframe chain (usually lands on
                    vidsrc.xyz; covered through follow_known_iframes)
+  * airflix1.com — chains through brightpathsignals.com whose CONFIG
+                   exposes streamdata.vaplayer.ru/api.php; that API
+                   returns a list of master .m3u8 URLs directly
   * xpass.top    — direct .m3u8 from /mdata/{hash}/{n}/playlist.json,
                    plus subtitle search via sub.wyzie.io
   * generic      — best-effort .m3u8 / .mp4 scrape for everything else
@@ -55,7 +58,6 @@ that we can't do from a plain urllib client):
   * vidup.to         — heavy JS bundle
   * ythd.org         — webpack-bundled obfuscated player
   * kllamrd.org      — anti-bot challenge before player loads
-  * airflix1.com     — chains to brightpathsignals.com (AES player)
   * frembed.bond     — /api/films catalog works, links redirect to
                        VOE / uqload / divxplayer (each needs own resolver)
 """
@@ -720,7 +722,8 @@ _IFRAME_FOLLOW_HOSTS: tuple[str, ...] = (
     "vsembed.ru", "cloudnestra.com", "2embed.cc", "2embed.org",
     "lookmovie2.skin", "play.xpass.top", "xpass.top", "vidsrc.cc",
     "vidrock.net", "vidsrc.vip", "moviesapi.club", "moviesapi.to",
-    "vidora.stream", "autoembed.cc",
+    "vidora.stream", "autoembed.cc", "airflix1.com",
+    "brightpathsignals.com",
 )
 
 
@@ -1032,6 +1035,106 @@ def resolve_autoembed(embed_url: str, refer: str) -> dict[str, Any] | None:
     return resolve_jwplayer_page(html, final, refer or final)
 
 
+def resolve_airflix(embed_url: str, refer: str) -> dict[str, Any] | None:
+    """airflix1.com /embed/{movie|tv}/{tmdb}[/{s}/{e}].
+
+    The airflix1 page is a thin wrapper that iframes
+    brightpathsignals.com/embed/... Both pages are protected by a
+    devtools-disabled JS shell, but the player config is plain JSON
+    inlined into the bps page and exposes:
+
+      CONFIG.streamDataApiUrl = "https://streamdata.vaplayer.ru/api.php"
+      CONFIG.idType           = "tmdb" | "imdb"
+      CONFIG.mediaType        = "movie" | "tv"
+
+    `availableSources: ["justhd"]` is the default — calling that API
+    with `?tmdb=<id>&type=movie` (or
+    `?tmdb=<id>&type=tv&season=X&episode=Y`) returns a JSON envelope:
+
+      { "status_code":"200",
+        "data": {
+          "title": ...,
+          "stream_urls": [ "https://.../master.m3u8", ... ],
+          "default_subs": [ ... ]
+        } }
+
+    The stream_urls list is several CDN backends in priority order
+    (the first few are the active mirror domains, the last is
+    tmstrd.justhd.tv). Try each one until we find a real master
+    playlist.
+    """
+    parsed = urlparse.urlparse(embed_url)
+    path = parsed.path
+
+    m = re.search(r"/embed/(movie|tv)/(tt\d+|\d+)(?:/(\d+)/(\d+))?", path)
+    if not m:
+        return None
+    media_type = m.group(1)
+    media_id = m.group(2)
+    season = m.group(3)
+    episode = m.group(4)
+
+    id_param = "imdb" if media_id.startswith("tt") else "tmdb"
+
+    api_url = (
+        f"https://streamdata.vaplayer.ru/api.php"
+        f"?{id_param}={urlparse.quote(media_id)}"
+        f"&type={media_type}"
+    )
+    if media_type == "tv" and season and episode:
+        api_url += f"&season={season}&episode={episode}"
+
+    # The bps origin is what the real player ships; vaplayer.ru only
+    # responds when both Referer and Origin match.
+    api_referer = "https://brightpathsignals.com/"
+    text, _, _ = fetch(api_url, {
+        "Referer": api_referer,
+        "Origin": "https://brightpathsignals.com",
+    })
+    if not text:
+        return None
+    try:
+        envelope = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if str(envelope.get("status_code")) != "200":
+        return None
+    payload = envelope.get("data") or {}
+    streams = payload.get("stream_urls") or []
+    if not streams:
+        return None
+
+    subs: list[dict[str, Any]] = []
+    for s in payload.get("default_subs") or []:
+        if not isinstance(s, dict):
+            continue
+        url = s.get("url") or s.get("file")
+        if not url:
+            continue
+        subs.append({
+            "url": url,
+            "language": (s.get("lang") or s.get("language") or "en").lower(),
+            "name": s.get("label") or (s.get("lang") or "EN").upper(),
+        })
+
+    for stream_url in streams:
+        try:
+            playlist, _, _ = fetch(stream_url, {"Referer": api_referer})
+        except Exception:
+            continue
+        if not playlist.startswith("#EXTM3U"):
+            continue
+        result = make_result(stream_url, api_referer, "", "hls")
+        if result is None:
+            continue
+        if subs:
+            result["subtitles"] = subs
+        LOG.info("airflix1 resolved via %s", host_of(stream_url))
+        return result
+
+    return None
+
+
 def stub_provider(name: str) -> Callable[[str, str], dict[str, Any] | None]:
     def _fn(embed_url: str, refer: str) -> dict[str, Any] | None:
         LOG.info("provider %s not implemented for %s", name, embed_url)
@@ -1060,6 +1163,8 @@ PROVIDERS: list[tuple[str, Callable[[str, str], dict[str, Any] | None]]] = [
     ("autoembed.cc",        resolve_autoembed),
     ("xpass.top",           resolve_xpass),
     ("play.xpass.top",      resolve_xpass),
+    ("airflix1.com",        resolve_airflix),
+    ("brightpathsignals.com", resolve_airflix),
     ("vidfast.pro",         stub_provider("vidfast.pro")),
     ("videasy.net",         stub_provider("videasy.net")),
     ("embed.su",            stub_provider("embed.su")),
@@ -1068,7 +1173,6 @@ PROVIDERS: list[tuple[str, Callable[[str, str], dict[str, Any] | None]]] = [
     ("vidup.to",            stub_provider("vidup.to")),
     ("vidking.net",         stub_provider("vidking.net")),
     ("embedmaster.link",    stub_provider("embedmaster.link")),
-    ("airflix1.com",        stub_provider("airflix1.com")),
     ("ythd.org",            stub_provider("ythd.org")),
     ("kllamrd.org",         stub_provider("kllamrd.org")),
     ("frembed.bond",        stub_provider("frembed.bond")),
@@ -1171,6 +1275,23 @@ def fallback_via_known_providers(ids: dict[str, str],
     is_tv = (kind == "tv")
 
     candidates: list[tuple[str, str, Callable[[str, str], dict[str, Any] | None]]] = []
+
+    # airflix1 — declared the default high-quality mirror by hydrahd; the
+    # vaplayer.ru API returns a fresh master.m3u8 for almost any title
+    # without a token, so try this first.
+    primary_id = tmdb or imdb
+    if primary_id:
+        if is_tv:
+            candidates.append((
+                "airflix1",
+                f"https://airflix1.com/embed/tv/{primary_id}/{season}/{episode}",
+                resolve_airflix,
+            ))
+        else:
+            candidates.append((
+                "airflix1", f"https://airflix1.com/embed/movie/{primary_id}",
+                resolve_airflix,
+            ))
 
     # xpass.top — best provider when MOV/MEG seeds the title; segments
     # come back as real video/mp2t most of the time.
