@@ -8,6 +8,7 @@
 
     <script type="text/brightscript" uri="pkg:/components/SearchView.brs" />
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
 
     <children>
         <Label id="title" translation="[60, 10]" text="Search" font="font:LargeBoldSystemFont" color="0xffffffff" />
@@ -15,15 +16,28 @@
         <Group id="layoutWrap" translation="[0, 0]">
             <LayoutGroup translation="[60, 70]" layoutDirection="horiz" itemSpacings="[40]">
                 <Group>
-                    <Keyboard id="kb" translation="[0,0]" />
-                    <Label id="kbHint" translation="[0, 320]" text="Press OK on Search after typing"
+                    <Label id="chipsLabel" translation="[0, 0]" text="Recent searches"
+                           font="font:SmallSystemFont" color="0x808080ff" visible="false" />
+                    <LayoutGroup id="chipsRow" translation="[0, 22]" layoutDirection="horiz"
+                                 itemSpacings="[8]" visible="false">
+                        <Button id="chip0" text="" minWidth="120" visible="false" />
+                        <Button id="chip1" text="" minWidth="120" visible="false" />
+                        <Button id="chip2" text="" minWidth="120" visible="false" />
+                        <Button id="chip3" text="" minWidth="120" visible="false" />
+                        <Button id="chip4" text="" minWidth="120" visible="false" />
+                        <Button id="chip5" text="" minWidth="120" visible="false" />
+                        <Button id="chipClear" text="Clear" minWidth="90" visible="false" />
+                    </LayoutGroup>
+
+                    <Keyboard id="kb" translation="[0, 80]" />
+                    <Label id="kbHint" translation="[0, 400]" text="Press OK on Search after typing - press UP for recent searches"
                            font="font:SmallSystemFont" color="0x808080ff" />
-                    <Button id="searchBtn" translation="[0, 360]" text="Search" minWidth="180" />
+                    <Button id="searchBtn" translation="[0, 440]" text="Search" minWidth="180" />
                 </Group>
 
                 <Group translation="[40, 0]">
-                    <Label id="resultTitle" text="Results" font="font:MediumBoldSystemFont" color="0xffffffff" />
-                    <MarkupGrid id="grid" translation="[0, 30]"
+                    <Label id="resultTitle" translation="[0, 80]" text="Results" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                    <MarkupGrid id="grid" translation="[0, 110]"
                                 itemSize="[230, 380]"
                                 numColumns="3"
                                 numRows="2"
@@ -31,7 +45,7 @@
                                 vertFocusAnimationStyle="floatingFocus"
                                 drawFocusFeedback="true"
                                 drawFocusFeedbackOnTop="true" />
-                    <Label id="empty" translation="[0, 80]" text="" font="font:MediumSystemFont"
+                    <Label id="empty" translation="[0, 160]" text="" font="font:MediumSystemFont"
                            color="0x808080ff" visible="false" />
                 </Group>
             </LayoutGroup>

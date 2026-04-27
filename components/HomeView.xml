@@ -8,6 +8,7 @@
 
     <script type="text/brightscript" uri="pkg:/components/HomeView.brs" />
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
 
     <children>
         <RowList id="rows"
@@ -28,5 +29,9 @@
 
         <Label id="empty" translation="[60, 400]" text="No content. Pull-to-refresh by pressing OK."
                font="font:MediumSystemFont" color="0x808080ff" visible="false" />
+
+        <!-- Side drawer. Drawn last so it overlays the content rows
+             when expanded. Stays as a thin focusable strip otherwise. -->
+        <SideMenu id="sideMenu" />
     </children>
 </component>

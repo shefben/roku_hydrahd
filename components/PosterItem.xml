@@ -15,6 +15,8 @@
             m.badge = m.top.findNode("badge")
             m.rating = m.top.findNode("rating")
             m.frame = m.top.findNode("frame")
+            m.progressTrack = m.top.findNode("progressTrack")
+            m.progressBar = m.top.findNode("progressBar")
         end sub
 
         sub onContent()
@@ -34,6 +36,31 @@
                 m.badge.visible = true
             else
                 m.badge.visible = false
+            end if
+            ' Resume bar - upstream views set percentageWatched (0..100)
+            ' on cells where the user has progress to show. Anything <=0
+            ' or >=100 hides the bar so finished/unstarted titles look
+            ' like a normal poster.
+            pct = 0
+            if c.percentageWatched <> invalid then
+                pv = c.percentageWatched
+                if Type(pv) = "Float" or Type(pv) = "roFloat" or Type(pv) = "Double" or Type(pv) = "roDouble" then
+                    pct = Int(pv)
+                else if Type(pv) = "String" or Type(pv) = "roString" then
+                    pct = pv.ToInt()
+                else
+                    pct = pv
+                end if
+            end if
+            if pct > 0 and pct < 100 then
+                m.progressTrack.visible = true
+                m.progressBar.visible = true
+                w = Int((pct * 220) / 100)
+                if w < 4 then w = 4
+                m.progressBar.width = w
+            else
+                m.progressTrack.visible = false
+                m.progressBar.visible = false
             end if
         end sub
 
@@ -55,6 +82,8 @@
                 failedBitmapUri="pkg:/images/placeholder.png" loadingBitmapUri="pkg:/images/placeholder.png" />
         <Label id="badge" translation="[8, 8]" text="" font="font:SmallestBoldSystemFont" color="0xffffffff" />
         <Label id="rating" translation="[8, 300]" text="" font="font:SmallestBoldSystemFont" color="0xffd24aff" />
+        <Rectangle id="progressTrack" translation="[0, 326]" width="220" height="4" color="0x000000aa" visible="false" />
+        <Rectangle id="progressBar" translation="[0, 326]" width="0" height="4" color="0xff2424ff" visible="false" />
         <Label id="title" translation="[0, 336]" width="220" height="22" maxLines="1" text=""
                font="font:SmallBoldSystemFont" color="0xc8c8c8ff" horizAlign="left" />
         <Label id="year" translation="[0, 358]" width="220" height="18" text=""

@@ -58,6 +58,8 @@ function resolveViaService(resolver as String, embedUrl as String) as Object
         qs = qs + "&episode=" + m.top.episode.ToStr()
     end if
     if m.top.refer <> "" then qs = qs + "&refer=" + U_UrlEncode(m.top.refer)
+    cid = U_ClientId()
+    if cid <> "" then qs = qs + "&cid=" + U_UrlEncode(cid)
     json = HA_GetJson(resolver + "/resolve" + qs)
     if json = invalid then return invalid
     if json.url = invalid or json.url = "" then return invalid
@@ -66,6 +68,7 @@ function resolveViaService(resolver as String, embedUrl as String) as Object
         streamFormat: ""
         qualities: []
         subtitles: []
+        chapters: []
         referer: ""
         userAgent: ""
     }
@@ -73,6 +76,7 @@ function resolveViaService(resolver as String, embedUrl as String) as Object
     if out.streamFormat = "" then out.streamFormat = U_StreamFormat(out.url)
     if json.qualities <> invalid then out.qualities = json.qualities
     if json.subtitles <> invalid then out.subtitles = json.subtitles
+    if json.chapters <> invalid then out.chapters = json.chapters
     if json.referer <> invalid then out.referer = json.referer
     if json.userAgent <> invalid then out.userAgent = json.userAgent
     return out

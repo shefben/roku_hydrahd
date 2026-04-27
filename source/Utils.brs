@@ -105,6 +105,30 @@ function U_DefaultResolverUrl() as String
     return ""  ' build:resolver-url
 end function
 
+' Stable per-(device, channel) opaque ID. The resolver uses this to
+' isolate cookie jars / session state so two Rokus on the same LAN
+' don't trample each other's playback. The first call generates the
+' value; subsequent calls return the cached string.
+function U_ClientId() as String
+    di = CreateObject("roDeviceInfo")
+    if di <> invalid then
+        ' GetChannelClientId is stable per channel per device and the
+        ' preferred opaque identifier on Roku OS 7.5+. It's already a
+        ' UUID-shaped string so no encoding needed.
+        cid = di.GetChannelClientId()
+        if cid <> invalid and cid <> "" then return cid
+    end if
+    ' Fallback for ancient devices / firmware: cache a random id in the
+    ' channel registry so the same Roku keeps the same cid across runs.
+    reg = CreateObject("roRegistrySection", "HydraHD")
+    if reg.Exists("clientId") then return reg.Read("clientId")
+    rand = CreateObject("roDeviceInfo").GetRandomUUID()
+    if rand = invalid or rand = "" then rand = "roku-" + CreateObject("roDateTime").AsSeconds().ToStr()
+    reg.Write("clientId", rand)
+    reg.Flush()
+    return rand
+end function
+
 function U_PrefDefault(key as String, default as Dynamic) as Dynamic
     reg = CreateObject("roRegistrySection", "HydraHD")
     if reg.Exists(key) then

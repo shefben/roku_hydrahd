@@ -44,6 +44,21 @@ sub init()
     m.activeAudio = -1
     m.openPanel = ""
 
+    ' Resume / progress tracking. lastSavedPos throttles writes to roughly
+    ' once every 5s; progressSaved flips false on the very first save so we
+    ' always persist the starting position even on quick stops.
+    m.startPosition = 0
+    m.lastSavedPos = -999
+    m.progressSaved = false
+
+    ' Skip Intro / Skip Credits banner state. chapters is filled from
+    ' args; activeChapter remembers the entry the playhead is inside so
+    ' an OK press during the window can act on it.
+    m.skipBanner = m.top.findNode("skipBanner")
+    m.skipLabel = m.top.findNode("skipLabel")
+    m.chapters = []
+    m.activeChapter = invalid
+
     applyCcGlobal()
 end sub
 
@@ -64,7 +79,23 @@ sub onArgs()
     m.streamUserAgent = ""
     if a.userAgent <> invalid then m.streamUserAgent = a.userAgent
 
-    print "[Player] qualities="; m.qualities.Count(); " subs="; m.subtitles.Count()
+    if a.startPosition <> invalid then
+        m.startPosition = W_AsInt(a.startPosition)
+    else
+        m.startPosition = 0
+    end if
+    m.lastSavedPos = -999
+    m.progressSaved = false
+
+    if a.chapters <> invalid then
+        m.chapters = a.chapters
+    else
+        m.chapters = []
+    end if
+    m.activeChapter = invalid
+    m.skipBanner.visible = false
+
+    print "[Player] qualities="; m.qualities.Count(); " subs="; m.subtitles.Count(); " resumeAt="; m.startPosition
     startPlayback(m.streamUrl, m.streamFormat)
     renderQualityChips()
     renderCcChips()
@@ -83,7 +114,7 @@ sub startPlayback(url as String, fmt as String)
     cn.streamFormat = fmt
     cn.title = m.title.text
     cn.live = false
-    cn.playStart = 0
+    cn.playStart = m.startPosition
     cn.httpCertificatesFile = "common:/certs/ca-bundle.crt"
     if m.top.args.poster <> invalid then cn.HDPosterUrl = m.top.args.poster
 
@@ -131,10 +162,20 @@ sub onVideoState()
     else if s = "buffering" then
         m.status.text = "Buffering..."
     else if s = "error" then
+        saveProgress(false)
+        ' If we never made it to the "playing" state and now errored,
+        ' blame the mirror so its reliability score drops.
+        if not m.progressSaved then
+            a = m.top.args
+            if a <> invalid and a.mirrorHost <> invalid and a.mirrorHost <> "" then
+                W_RecordMirrorOutcome(a.mirrorHost, false)
+            end if
+        end if
         showOverlay()
         m.status.text = "Playback error: " + m.video.errorStr
         print "[Player] errorStr="; m.video.errorStr; " errorCode="; m.video.errorCode
     else if s = "finished" then
+        saveProgress(true)
         if tryAutoAdvance() then return
         ' Stream ended and there's no next episode (or this is a movie).
         ' Show the overlay so the user can pick something else.
@@ -178,6 +219,133 @@ function tryAutoAdvance() as Boolean
 end function
 
 sub onVideoPosition()
+    pos = W_AsInt(m.video.position)
+    updateSkipBanner(pos)
+    ' Save the very first heartbeat (so a quick exit still records something),
+    ' then throttle to once every 5s while playing.
+    if not m.progressSaved then
+        saveProgress(false)
+        return
+    end if
+    if Abs(pos - m.lastSavedPos) >= 5 then saveProgress(false)
+end sub
+
+' Show the bottom-right skip banner whenever the playhead falls inside
+' a chapter the resolver tagged as intro / outro. We never invent
+' chapter data, so an empty m.chapters keeps the banner permanently
+' hidden and the user gets a totally normal player.
+sub updateSkipBanner(pos as Integer)
+    if m.chapters = invalid or m.chapters.Count() = 0 then
+        if m.activeChapter <> invalid or m.skipBanner.visible then
+            m.activeChapter = invalid
+            m.skipBanner.visible = false
+        end if
+        return
+    end if
+    hit = invalid
+    for each ch in m.chapters
+        cs = W_AsInt(ch.start)
+        ce = W_AsInt(ch.end)
+        if pos >= cs and pos < ce then
+            hit = ch
+            exit for
+        end if
+    end for
+    if hit = invalid then
+        if m.activeChapter <> invalid or m.skipBanner.visible then
+            m.activeChapter = invalid
+            m.skipBanner.visible = false
+        end if
+        return
+    end if
+    if m.activeChapter <> invalid and m.activeChapter.start = hit.start and m.activeChapter.end = hit.end then
+        return
+    end if
+    m.activeChapter = hit
+    kind = ""
+    if hit.kind <> invalid then kind = hit.kind
+    if kind = "outro" then
+        m.skipLabel.text = "> Skip Credits   -   press OK"
+    else if kind = "recap" then
+        m.skipLabel.text = "> Skip Recap   -   press OK"
+    else
+        m.skipLabel.text = "> Skip Intro   -   press OK"
+    end if
+    m.skipBanner.visible = true
+end sub
+
+' Perform the skip the banner advertised. For TV outros we try to
+' auto-advance to the next episode (mirrors the existing finished-state
+' path); everything else just seeks past the chapter window.
+sub performSkip()
+    ch = m.activeChapter
+    if ch = invalid then return
+    target = W_AsInt(ch.end)
+    a = m.top.args
+    isTvOutro = false
+    if ch.kind <> invalid and ch.kind = "outro" then
+        if a <> invalid and a.kind = "tv" and a.episodeQueue <> invalid then
+            isTvOutro = true
+        end if
+    end if
+    m.activeChapter = invalid
+    m.skipBanner.visible = false
+    if isTvOutro then
+        ' Mark current episode finished and jump to the next one.
+        saveProgress(true)
+        if tryAutoAdvance() then return
+    end if
+    if target > 0 then m.video.seek = target
+end sub
+
+' Persist the current position to the watchlist registry. forceFinished is
+' used when the stream's own "finished" state fires - some live-ish HLS
+' manifests stop short of `duration`, so we trust the player there.
+sub saveProgress(forceFinished as Boolean)
+    a = m.top.args
+    if a = invalid then return
+    pos = W_AsInt(m.video.position)
+    dur = W_AsInt(m.video.duration)
+    if forceFinished and dur > 0 then pos = dur
+    if pos <= 0 and not forceFinished then return
+
+    m.lastSavedPos = pos
+    m.progressSaved = true
+
+    imdb = ""
+    if a.imdb <> invalid then imdb = a.imdb
+    href = ""
+    if a.href <> invalid then href = a.href
+    kind = ""
+    if a.kind <> invalid then kind = a.kind
+    title = ""
+    if a.title <> invalid then title = a.title
+    poster = ""
+    if a.poster <> invalid then poster = a.poster
+    tmdb = ""
+    if a.tmdb <> invalid then tmdb = a.tmdb
+    ' Stash a tile-friendly snapshot once per playback session so the
+    ' Continue Watching row can render without re-fetching details.
+    itemKey = W_ItemKey(imdb, href)
+    if itemKey <> "" then
+        W_RememberContext(itemKey, {
+            title:  title
+            poster: poster
+            href:   href
+            imdb:   imdb
+            tmdb:   tmdb
+            kind:   kind
+        })
+    end if
+    if kind = "tv" and a.episode <> invalid then
+        slug = ""
+        if a.episode.slug <> invalid then slug = a.episode.slug
+        name = ""
+        if a.episode.name <> invalid then name = a.episode.name
+        W_SaveEpisodeProgress(imdb, href, a.episode.season, a.episode.episode, pos, dur, slug, name)
+    else
+        W_SaveMovieProgress(imdb, href, pos, dur)
+    end if
 end sub
 
 sub onSegmentDownloaded()
@@ -220,6 +388,10 @@ end sub
 sub showOverlay()
     m.overlayBg.visible = true
     m.overlay.visible = true
+    ' Banner would peek through the translucent overlay backdrop and
+    ' look broken; hide it while the overlay is up. updateSkipBanner
+    ' on the next position tick will bring it back if still relevant.
+    m.skipBanner.visible = false
     m.actionBar.setFocus(true)
     m.openPanel = ""
 end sub
@@ -233,6 +405,10 @@ sub hideOverlay()
     m.audioPanel.visible = false
     m.openPanel = ""
     m.video.setFocus(true)
+    ' Re-evaluate the banner now (in case the playhead is still inside
+    ' a chapter window the user dismissed the overlay through).
+    m.activeChapter = invalid
+    updateSkipBanner(W_AsInt(m.video.position))
 end sub
 
 sub onActionBar()
@@ -276,6 +452,7 @@ sub onResume()
 end sub
 
 sub onStop()
+    saveProgress(false)
     m.video.control = "stop"
     m.top.requestNav = { action: "back" }
 end sub
@@ -423,6 +600,14 @@ end sub
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
     if key = "OK" or key = "options" then
+        ' If the resolver gave us a chapter window and we're inside it,
+        ' OK fires the skip instead of opening the overlay. Banner is
+        ' only visible when there's a real chapter to skip, so this
+        ' path stays dormant for streams without chapter data.
+        if m.skipBanner.visible and m.activeChapter <> invalid and not m.overlay.visible then
+            performSkip()
+            return true
+        end if
         if m.overlay.visible then
             ' Let ButtonGroup handle OK on its focused button.
             if m.openPanel <> "" then return false
@@ -448,6 +633,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             hideOverlay()
             return true
         end if
+        saveProgress(false)
         m.video.control = "stop"
         m.top.requestNav = { action: "back" }
         return true

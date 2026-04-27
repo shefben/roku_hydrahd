@@ -2,6 +2,10 @@
 <component name="MainScene" extends="Scene">
     <interface>
         <field id="deepLink" type="assocarray" />
+        <!-- main.brs observes this. When SideMenu's "Exit" button is
+             chosen we set it to true and main.brs returns from its
+             event loop, closing the channel. -->
+        <field id="exitRequested" type="bool" value="false" alwaysNotify="true" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
@@ -16,6 +20,7 @@
             <Button id="navMovies" text="Movies" minWidth="140" />
             <Button id="navTv" text="TV Shows" minWidth="160" />
             <Button id="navTrending" text="Trending" minWidth="160" />
+            <Button id="navMyList" text="My List" minWidth="140" />
             <Button id="navSearch" text="Search" minWidth="140" />
             <Button id="navSettings" text="Settings" minWidth="160" />
         </LayoutGroup>

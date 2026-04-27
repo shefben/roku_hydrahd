@@ -11,10 +11,22 @@ sub init()
     m.grid = m.top.findNode("grid")
     m.header = m.top.findNode("header")
     m.empty = m.top.findNode("empty")
+    m.sideMenu = m.top.findNode("sideMenu")
     m.grid.itemComponentName = "PosterItem"
     m.grid.observeField("itemSelected", "onItemSelected")
     m.grid.observeField("itemFocused", "onItemFocused")
+    m.sideMenu.observeField("command", "onSideMenuCommand")
     m.grid.setFocus(true)
+end sub
+
+sub onSideMenuCommand()
+    cmd = m.sideMenu.command
+    if cmd = invalid then return
+    if cmd.action = "collapsed" then
+        m.grid.setFocus(true)
+        return
+    end if
+    m.top.requestNav = cmd
 end sub
 
 sub onArgs()
@@ -25,7 +37,12 @@ sub onArgs()
     m.page = 0
     m.allDone = false
     m.items = []
-    m.grid.content = invalid
+    ' Start with an empty content node so subsequent pages can append
+    ' children in place rather than replacing the whole tree (which
+    ' was wiping the grid's focus state mid-navigation and leaving the
+    ' cursor "stuck" on whatever poster happened to be focused when
+    ' a new page arrived).
+    m.grid.content = createObject("roSGNode", "ContentNode")
     fetchPage()
 end sub
 
@@ -59,17 +76,20 @@ sub onPageResult()
         return
     end if
 
-    for each it in items
-        m.items.Push(it)
-    end for
-    rebuildGrid()
+    appendItems(items)
 end sub
 
-sub rebuildGrid()
-    keepIdx = m.grid.itemFocused
-    if keepIdx = invalid or keepIdx < 0 then keepIdx = 0
-    root = createObject("roSGNode", "ContentNode")
-    for each item in m.items
+' Append new cells to the live ContentNode instead of swapping the
+' whole tree. The MarkupGrid keeps its current focus index, the user's
+' cursor doesn't snap or freeze when a page arrives mid-navigation,
+' and we don't lose the in-flight scroll animation.
+sub appendItems(items as Object)
+    root = m.grid.content
+    if root = invalid then
+        root = createObject("roSGNode", "ContentNode")
+        m.grid.content = root
+    end if
+    for each item in items
         cell = root.createChild("ContentNode")
         cell.title = item.title
         cell.HDPosterUrl = item.poster
@@ -80,11 +100,9 @@ sub rebuildGrid()
         cell.id = item.id
         cell.contentType = item.kind
         cell.url = item.href
+        cell.percentageWatched = W_GetProgressPct("", item.href, 0, 0)
+        m.items.Push(item)
     end for
-    m.grid.content = root
-    if keepIdx > 0 and keepIdx < m.items.Count() then
-        m.grid.jumpToItem = keepIdx
-    end if
 end sub
 
 sub onItemFocused()
@@ -102,6 +120,20 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         if idx < m.grid.numColumns then
             ' At top row - let MainScene bubble to nav buttons.
             return false
+        end if
+    end if
+    ' LEFT at the leftmost column hands focus to the side drawer's
+    ' collapsed strip. MarkupGrid only bubbles left when the focused
+    ' cell is already at column 0.
+    if key = "left" and m.grid.hasFocus() then
+        idx = m.grid.itemFocused
+        if idx = invalid then idx = 0
+        cols = m.grid.numColumns
+        if cols < 1 then cols = 1
+        col = idx mod cols
+        if col = 0 then
+            m.sideMenu.callFunc("focusStrip", invalid)
+            return true
         end if
     end if
     return false

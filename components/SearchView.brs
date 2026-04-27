@@ -1,4 +1,5 @@
-' SearchView.brs - On-screen keyboard + grid of results.
+' SearchView.brs - On-screen keyboard + grid of results, with a row of
+' recent-query chips above the keyboard.
 
 sub init()
     m.items = []
@@ -13,6 +14,10 @@ sub init()
     m.layoutWrap = m.top.findNode("layoutWrap")
     m.slideAnim = m.top.findNode("slideAnim")
     m.slideInterp = m.top.findNode("slideInterp")
+    m.chipsLabel = m.top.findNode("chipsLabel")
+    m.chipsRow = m.top.findNode("chipsRow")
+    m.chipClear = m.top.findNode("chipClear")
+
     m.kb.text = ""
     m.grid.itemComponentName = "PosterItem"
     m.searchBtn.observeField("buttonSelected", "onSearchClick")
@@ -22,6 +27,16 @@ sub init()
     m.timer.duration = 0.6
     m.timer.repeat = false
     m.timer.observeField("fire", "onDebounce")
+
+    m.maxChips = 6
+    m.chipNodes = []
+    for i = 0 to m.maxChips - 1
+        node = m.top.findNode("chip" + i.ToStr())
+        m.chipNodes.Push(node)
+        node.observeField("buttonSelected", "onChipPressed")
+    end for
+    m.chipClear.observeField("buttonSelected", "onChipsClear")
+    renderChips()
 
     ' MainScene.focusActiveChild() runs *after* this init returns and calls
     ' setFocus(true) on the SearchView root Group, which would yank focus
@@ -109,9 +124,14 @@ sub onResult()
         cell.id = item.id
         cell.contentType = item.kind
         cell.url = item.href
+        cell.percentageWatched = W_GetProgressPct("", item.href, 0, 0)
     end for
     m.grid.content = root
     m.resultTitle.text = m.items.Count().ToStr() + " results"
+    ' Now that the user got real results, remember the query and
+    ' refresh the chip row so it's there next time they come back.
+    W_PushSearchQuery(m.lastQuery)
+    renderChips()
 end sub
 
 sub onItemSelected()
@@ -132,17 +152,141 @@ sub onItemSelected()
     }
 end sub
 
+' --- Recent-query chips --------------------------------------------------
+
+sub renderChips()
+    history = W_GetSearchHistory()
+    if history = invalid then history = []
+    visibleCount = history.Count()
+    if visibleCount > m.maxChips then visibleCount = m.maxChips
+    for i = 0 to m.maxChips - 1
+        node = m.chipNodes[i]
+        if i < visibleCount then
+            node.text = history[i]
+            node.visible = true
+        else
+            node.text = ""
+            node.visible = false
+        end if
+    end for
+    show = (visibleCount > 0)
+    m.chipsLabel.visible = show
+    m.chipsRow.visible = show
+    m.chipClear.visible = show
+end sub
+
+sub onChipPressed(event as Object)
+    sender = event.getRoSGNode()
+    if sender = invalid then return
+    q = sender.text
+    if q = invalid or q = "" then return
+    m.kb.text = q
+    m.lastQuery = ""
+    runQuery()
+    if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
+        m.grid.setFocus(true)
+        showResults()
+    else
+        m.kb.setFocus(true)
+    end if
+end sub
+
+sub onChipsClear()
+    W_ClearSearchHistory()
+    renderChips()
+    ' Drop focus back to keyboard since the chip the user was on just
+    ' disappeared - never leave them stranded.
+    m.kb.setFocus(true)
+end sub
+
+' --- Focus / remote navigation -------------------------------------------
+
+function chipsHaveFocus() as Boolean
+    if m.chipClear.hasFocus() then return true
+    for each node in m.chipNodes
+        if node.hasFocus() then return true
+    end for
+    return false
+end function
+
+function focusFirstVisibleChip() as Boolean
+    if not m.chipsRow.visible then return false
+    for each node in m.chipNodes
+        if node.visible then
+            node.setFocus(true)
+            return true
+        end if
+    end for
+    if m.chipClear.visible then
+        m.chipClear.setFocus(true)
+        return true
+    end if
+    return false
+end function
+
+function chipNeighbor(delta as Integer) as Object
+    ' Build the in-order list of currently-focusable chip buttons.
+    seq = []
+    for each node in m.chipNodes
+        if node.visible then seq.Push(node)
+    end for
+    if m.chipClear.visible then seq.Push(m.chipClear)
+    if seq.Count() = 0 then return invalid
+    cur = -1
+    for i = 0 to seq.Count() - 1
+        if seq[i].hasFocus() then
+            cur = i
+            exit for
+        end if
+    end for
+    if cur < 0 then return seq[0]
+    target = cur + delta
+    if target < 0 or target >= seq.Count() then return invalid
+    return seq[target]
+end function
+
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
     ' Safety net: if focus somehow ends up on the root Group (e.g. focus
     ' race during view push) any directional key should land on the
     ' keyboard so the user is never stranded with dead arrows.
-    if not m.kb.hasFocus() and not m.searchBtn.hasFocus() and not m.grid.hasFocus() then
+    if not m.kb.hasFocus() and not m.searchBtn.hasFocus() and not m.grid.hasFocus() and not chipsHaveFocus() then
         if key = "up" or key = "down" or key = "left" or key = "right" or key = "OK" then
             m.kb.setFocus(true)
             showKeyboard()
             return true
         end if
+    end if
+    if chipsHaveFocus() then
+        if key = "left" then
+            n = chipNeighbor(-1)
+            if n <> invalid then
+                n.setFocus(true)
+                return true
+            end if
+            return true
+        end if
+        if key = "right" then
+            n = chipNeighbor(1)
+            if n <> invalid then
+                n.setFocus(true)
+                return true
+            end if
+            return true
+        end if
+        if key = "down" then
+            m.kb.setFocus(true)
+            return true
+        end if
+        if key = "up" then
+            ' Bubble out so MainScene can grab the nav bar.
+            return false
+        end if
+    end if
+    if key = "up" and m.kb.hasFocus() then
+        if focusFirstVisibleChip() then return true
+        ' No chips - bubble so MainScene grabs nav.
+        return false
     end if
     if key = "down" and m.kb.hasFocus() then
         m.searchBtn.setFocus(true)

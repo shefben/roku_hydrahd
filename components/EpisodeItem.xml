@@ -15,6 +15,9 @@
             m.title = m.top.findNode("title")
             m.airdate = m.top.findNode("airdate")
             m.desc = m.top.findNode("desc")
+            m.badge = m.top.findNode("badge")
+            m.badgeLabel = m.top.findNode("badgeLabel")
+            m.statusKind = ""
         end sub
         sub onContent()
             c = m.top.itemContent
@@ -30,12 +33,60 @@
             if c.HDPosterUrl <> invalid and c.HDPosterUrl <> "" then
                 m.thumb.uri = c.HDPosterUrl
             end if
+
+            ' DetailsView packs watched-state into releaseDate as
+            '   "current:<text>" - up next / resume target (yellow badge)
+            '   "watched"        - finished (green check)
+            '   "partial:<time>" - started but not finished (gray dot)
+            marker = ""
+            if c.releaseDate <> invalid then marker = c.releaseDate
+            kind = marker
+            text = ""
+            colon = Instr(1, marker, ":")
+            if colon > 0 then
+                kind = Left(marker, colon - 1)
+                text = Mid(marker, colon + 1)
+            end if
+            m.statusKind = kind
+            if kind = "current" then
+                m.badge.color = "0xffd24aff"
+                m.badgeLabel.color = "0x141414ff"
+                if text = "" then text = "Up next"
+                m.badgeLabel.text = text
+                m.badge.visible = true
+            else if kind = "watched" then
+                m.badge.color = "0x2ea043ff"
+                m.badgeLabel.color = "0xffffffff"
+                m.badgeLabel.text = "Watched"
+                m.badge.visible = true
+            else if kind = "partial" then
+                m.badge.color = "0x4a4a4aff"
+                m.badgeLabel.color = "0xffffffff"
+                if text = "" then text = "In progress"
+                m.badgeLabel.text = text
+                m.badge.visible = true
+            else
+                m.badge.visible = false
+                m.badgeLabel.text = ""
+            end if
+            applyRowColors(false)
         end sub
         sub onFocus()
             f = m.top.focusPercent
-            if f >= 0.5 then
+            applyRowColors(f >= 0.5)
+        end sub
+        sub applyRowColors(focused as Boolean)
+            if focused then
                 m.bg.color = "0x252525ff"
                 m.title.color = "0xff2424ff"
+            else if m.statusKind = "current" then
+                ' Tint the background gold so the resume target stands out
+                ' even when the user has scrolled focus elsewhere.
+                m.bg.color = "0x2a2410ff"
+                m.title.color = "0xffd24aff"
+            else if m.statusKind = "watched" then
+                m.bg.color = "0x101810ff"
+                m.title.color = "0x9a9a9aff"
             else
                 m.bg.color = "0x141414ff"
                 m.title.color = "0xffffffff"
@@ -49,11 +100,16 @@
                 failedBitmapUri="pkg:/images/placeholder.png" />
         <Label id="epnum" translation="[220, 12]" width="200" maxLines="1" text=""
                font="font:SmallBoldSystemFont" color="0xff8a8aff" />
-        <Label id="title" translation="[220, 32]" width="1500" maxLines="1" text=""
+        <Label id="title" translation="[220, 32]" width="1100" maxLines="1" text=""
                font="font:LargeBoldSystemFont" color="0xffffffff" />
-        <Label id="airdate" translation="[220, 70]" width="1500" maxLines="1" text=""
+        <Label id="airdate" translation="[220, 70]" width="1100" maxLines="1" text=""
                font="font:SmallSystemFont" color="0x9a9a9aff" />
-        <Label id="desc" translation="[220, 92]" width="1500" maxLines="2" text=""
+        <Label id="desc" translation="[220, 92]" width="1140" maxLines="2" text=""
                font="font:SmallSystemFont" color="0xc8c8c8ff" wrap="true" />
+        <Rectangle id="badge" translation="[1380, 14]" width="350" height="36"
+                   color="0xffd24aff" visible="false" />
+        <Label id="badgeLabel" translation="[1380, 14]" width="350" height="36" text=""
+               font="font:SmallBoldSystemFont" color="0x141414ff"
+               horizAlign="center" vertAlign="center" />
     </children>
 </component>

@@ -14,10 +14,20 @@ sub Main(args as Dynamic)
         scene.deepLink = args
     end if
 
+    ' SideMenu's "Exit" button flips this field; we treat it like a
+    ' user-initiated close so the channel returns to the home screen
+    ' instead of just hiding the UI.
+    scene.observeField("exitRequested", port)
+
     while true
         msg = wait(0, port)
         if type(msg) = "roSGScreenEvent" then
             if msg.isScreenClosed() then return
+        else if type(msg) = "roSGNodeEvent" then
+            if msg.getField() = "exitRequested" and msg.getData() = true then
+                screen.close()
+                return
+            end if
         end if
     end while
 end sub

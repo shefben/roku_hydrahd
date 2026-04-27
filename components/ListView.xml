@@ -8,6 +8,7 @@
 
     <script type="text/brightscript" uri="pkg:/components/ListView.brs" />
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
 
     <children>
         <Label id="header" translation="[60, 10]" text="" font="font:LargeBoldSystemFont" color="0xffffffff" />
@@ -22,5 +23,7 @@
                     drawFocusFeedbackOnTop="true" />
         <Label id="empty" translation="[60, 400]" text="No results" font="font:MediumSystemFont"
                color="0x808080ff" visible="false" />
+
+        <SideMenu id="sideMenu" />
     </children>
 </component>

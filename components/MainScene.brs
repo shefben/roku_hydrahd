@@ -10,12 +10,13 @@ sub init()
     m.contentDefaultY = 110
 
     m.navTabs = [
-        { id: "navHome",     view: "HomeView",     args: invalid },
-        { id: "navMovies",   view: "ListView",     args: { source: "movies",  title: "Movies" } },
-        { id: "navTv",       view: "ListView",     args: { source: "tv",      title: "TV Shows" } },
-        { id: "navTrending", view: "ListView",     args: { source: "popular", title: "Trending" } },
-        { id: "navSearch",   view: "SearchView",   args: invalid },
-        { id: "navSettings", view: "SettingsView", args: invalid }
+        { id: "navHome",     view: "HomeView",      args: invalid },
+        { id: "navMovies",   view: "ListView",      args: { source: "movies",  title: "Movies" } },
+        { id: "navTv",       view: "ListView",      args: { source: "tv",      title: "TV Shows" } },
+        { id: "navTrending", view: "ListView",      args: { source: "popular", title: "Trending" } },
+        { id: "navMyList",   view: "FavoritesView", args: invalid },
+        { id: "navSearch",   view: "SearchView",    args: invalid },
+        { id: "navSettings", view: "SettingsView",  args: invalid }
     ]
 
     m.navButtons = []
@@ -114,7 +115,27 @@ sub onChildNavRequest(event as Object)
         replaceView(payload.view, payload.args)
     else if action = "back" then
         popView()
+    else if action = "navTab" then
+        ' SideMenu fires this to switch the user to a different top-
+        ' level tab, identical to clicking that nav button.
+        switchToTab(payload.tabId)
+    else if action = "exit" then
+        ' main.brs is observing exitRequested and returns when set.
+        m.top.exitRequested = true
     end if
+end sub
+
+sub switchToTab(tabId as String)
+    if tabId = "" or tabId = invalid then return
+    for i = 0 to m.navTabs.Count() - 1
+        if m.navTabs[i].id = tabId then
+            m.activeNavIndex = i
+            m.viewStack = []
+            pushView(m.navTabs[i].view, m.navTabs[i].args)
+            focusActiveChild()
+            return
+        end if
+    end for
 end sub
 
 function navHasFocus() as Boolean

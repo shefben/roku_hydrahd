@@ -65,17 +65,209 @@ that we can't do from a plain urllib client):
 from __future__ import annotations
 
 import argparse
+import atexit
+import http.cookiejar
 import json
 import logging
+import os
+import pickle
 import re
 import sys
+import tempfile
+import threading
+import time
 import urllib.parse as urlparse
+from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPCookieProcessor, OpenerDirector, Request, build_opener
 
 LOG = logging.getLogger("hydrahd-resolver")
+
+
+# --- Per-client session isolation ------------------------------------
+#
+# Multiple Roku devices on the same LAN can hit one resolver at the same
+# time. Many upstream providers track Set-Cookie / session state (CF
+# clearance, anti-abuse tokens, "current playing" session keys), and if
+# we share a single cookie jar between devices then device A's resolve
+# will overwrite cookies device B is mid-playback with - causing 403s,
+# stalls, and "stream from wrong title" mix-ups.
+#
+# We give every device its own cookie jar, keyed by an opaque "cid"
+# (client id) that the Roku channel sends on every /resolve and /stream
+# request. The cid is forwarded into proxied URLs so HLS segment fetches
+# stay on the same jar that resolved the master playlist.
+
+_CLIENTS_LOCK = threading.Lock()
+_CLIENTS: "OrderedDict[str, OpenerDirector]" = OrderedDict()
+_MAX_CLIENTS = 64
+
+# Thread-local opener picked up by fetch() / proxy fetches so we don't
+# have to thread the opener through every helper signature.
+_LOCAL = threading.local()
+
+
+def _build_opener() -> OpenerDirector:
+    jar = http.cookiejar.CookieJar()
+    return build_opener(HTTPCookieProcessor(jar))
+
+
+# Anonymous fallback opener for callers that don't carry a cid.
+_DEFAULT_OPENER = _build_opener()
+
+
+def _opener_for(cid: str) -> OpenerDirector:
+    if not cid:
+        return _DEFAULT_OPENER
+    with _CLIENTS_LOCK:
+        op = _CLIENTS.get(cid)
+        if op is None:
+            op = _build_opener()
+            _CLIENTS[cid] = op
+            # LRU eviction so a long-running resolver doesn't grow the
+            # client table unbounded as Rokus come and go.
+            while len(_CLIENTS) > _MAX_CLIENTS:
+                _CLIENTS.popitem(last=False)
+        else:
+            _CLIENTS.move_to_end(cid)
+        return op
+
+
+def _set_active_opener(opener: OpenerDirector) -> None:
+    _LOCAL.opener = opener
+
+
+def _clear_active_opener() -> None:
+    _LOCAL.opener = None
+
+
+def _active_opener() -> OpenerDirector:
+    return getattr(_LOCAL, "opener", None) or _DEFAULT_OPENER
+
+
+# --- Persistent cookie cache -----------------------------------------
+#
+# CF clearance, anti-abuse tokens, and provider session cookies take
+# real time to acquire (and sometimes a Turnstile retry). Saving them
+# to disk so a resolver restart doesn't dump every Roku back to a cold
+# session means the next playback after reboot still resumes quickly.
+#
+# We snapshot the per-cid cookie jars to a single pickle file, replaced
+# atomically. A background daemon thread re-saves every CACHE_FLUSH_S
+# seconds; atexit fires on graceful shutdown.
+
+CACHE_FLUSH_S = 60
+_COOKIE_CACHE_PATH: str | None = None
+_COOKIE_CACHE_LOCK = threading.Lock()
+_COOKIE_FLUSH_THREAD: threading.Thread | None = None
+_COOKIE_FLUSH_STOP = threading.Event()
+
+
+def _jar_of(opener: OpenerDirector) -> http.cookiejar.CookieJar | None:
+    for h in opener.handlers:
+        if isinstance(h, HTTPCookieProcessor):
+            return h.cookiejar
+    return None
+
+
+def _snapshot_cookies() -> list[tuple[str, list[http.cookiejar.Cookie]]]:
+    out: list[tuple[str, list[http.cookiejar.Cookie]]] = []
+    with _CLIENTS_LOCK:
+        items = list(_CLIENTS.items())
+    for cid, opener in items:
+        jar = _jar_of(opener)
+        if jar is None:
+            continue
+        # CookieJar is iterable but uses an internal lock; copy under that lock.
+        try:
+            cookies = list(jar)
+        except Exception:
+            continue
+        out.append((cid, cookies))
+    return out
+
+
+def _save_cookie_cache() -> None:
+    if not _COOKIE_CACHE_PATH:
+        return
+    try:
+        snapshot = _snapshot_cookies()
+        if not snapshot:
+            return
+        with _COOKIE_CACHE_LOCK:
+            d = os.path.dirname(_COOKIE_CACHE_PATH) or "."
+            os.makedirs(d, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(prefix="cookies-", suffix=".tmp", dir=d)
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    pickle.dump({"version": 1, "saved_at": time.time(),
+                                 "clients": snapshot}, f,
+                                protocol=pickle.HIGHEST_PROTOCOL)
+                os.replace(tmp, _COOKIE_CACHE_PATH)
+            except Exception:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+    except Exception as exc:  # noqa: BLE001
+        LOG.warning("cookie cache save failed: %s", exc)
+
+
+def _load_cookie_cache() -> None:
+    if not _COOKIE_CACHE_PATH or not os.path.exists(_COOKIE_CACHE_PATH):
+        return
+    try:
+        with open(_COOKIE_CACHE_PATH, "rb") as f:
+            data = pickle.load(f)
+    except Exception as exc:  # noqa: BLE001
+        LOG.warning("cookie cache load failed (%s); starting fresh", exc)
+        return
+    clients = data.get("clients") if isinstance(data, dict) else None
+    if not clients:
+        return
+    restored = 0
+    with _CLIENTS_LOCK:
+        for cid, cookies in clients:
+            if not cid:
+                continue
+            opener = _build_opener()
+            jar = _jar_of(opener)
+            if jar is None:
+                continue
+            for c in cookies:
+                # Defensively skip already-expired cookies on load so we
+                # don't resurrect garbage and immediately discard it.
+                try:
+                    if c.is_expired(time.time()):
+                        continue
+                    jar.set_cookie(c)
+                except Exception:
+                    continue
+            _CLIENTS[cid] = opener
+            restored += 1
+            if len(_CLIENTS) > _MAX_CLIENTS:
+                _CLIENTS.popitem(last=False)
+    LOG.info("restored %d client cookie jar(s) from %s",
+             restored, _COOKIE_CACHE_PATH)
+
+
+def _flush_loop() -> None:
+    while not _COOKIE_FLUSH_STOP.wait(CACHE_FLUSH_S):
+        _save_cookie_cache()
+
+
+def _start_cookie_persistence(path: str) -> None:
+    global _COOKIE_CACHE_PATH, _COOKIE_FLUSH_THREAD
+    _COOKIE_CACHE_PATH = path
+    _load_cookie_cache()
+    atexit.register(_save_cookie_cache)
+    _COOKIE_FLUSH_THREAD = threading.Thread(
+        target=_flush_loop, name="cookie-cache-flush", daemon=True
+    )
+    _COOKIE_FLUSH_THREAD.start()
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -98,7 +290,7 @@ def fetch(url: str, headers: dict[str, str] | None = None,
     headers.setdefault("Accept-Language", "en-US,en;q=0.9")
     req = Request(url, headers=headers, data=body, method=method)
     try:
-        with urlopen(req, timeout=20) as resp:
+        with _active_opener().open(req, timeout=20) as resp:
             data = resp.read()
             ctype = resp.headers.get("Content-Type", "")
             text = data.decode("utf-8", "replace")
@@ -185,6 +377,144 @@ def collect_subtitles(html: str) -> list[dict[str, Any]]:
     return out
 
 
+# --- Chapter / "skip intro" detection -------------------------------
+#
+# We never *invent* skip data - if a provider doesn't ship it, no
+# button shows up. We do scan two real places where skip info shows up
+# in the wild:
+#
+#   1. Player config in the iframe HTML. Common shapes are:
+#        "skipIntro":{"start":60,"end":90}
+#        "intro":{"start":...,"end":...}
+#        "outro":{"start":...,"end":...}
+#        introStart / introEnd numeric pairs
+#
+#   2. The HLS playlist's #EXT-X-DATERANGE markers (RFC 8216), when
+#      the upstream tags chapters with CLASS containing intro / outro /
+#      recap / credits and supplies X-START / X-END or DURATION.
+#
+# Result is a list of {kind: "intro"|"outro"|"recap", start: float,
+# end: float}. Order doesn't matter; the channel just looks for the
+# first one that contains the current playhead.
+
+_CHAPTER_KIND_MAP = {
+    "intro": "intro", "opening": "intro",
+    "outro": "outro", "credits": "outro", "ending": "outro",
+    "recap": "recap",
+}
+
+
+def _coerce_kind(label: str) -> str | None:
+    s = label.lower()
+    for needle, kind in _CHAPTER_KIND_MAP.items():
+        if needle in s:
+            return kind
+    return None
+
+
+def extract_chapters_from_html(html: str) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    if not html:
+        return out
+    seen: set[str] = set()
+
+    # JSON-style "(skip)?(intro|outro|credits|recap|opening|ending)":{"start":N,"end":N}
+    json_re = re.compile(
+        r'"(?:skip)?(intro|outro|credits|recap|opening|ending)"\s*:\s*'
+        r'\{\s*"start"\s*:\s*(\d+(?:\.\d+)?)\s*,\s*"end"\s*:\s*(\d+(?:\.\d+)?)',
+        re.IGNORECASE,
+    )
+    for m in json_re.finditer(html):
+        kind = _coerce_kind(m.group(1))
+        if not kind or kind in seen:
+            continue
+        try:
+            start = float(m.group(2))
+            end = float(m.group(3))
+        except ValueError:
+            continue
+        if end > start:
+            out.append({"kind": kind, "start": start, "end": end})
+            seen.add(kind)
+
+    # Numeric pair fallback (introStart=60, introEnd=90)
+    pair_re = re.compile(
+        r'(intro|outro|credits|recap|opening|ending)[_\-]?start["\s:=,]+(\d+(?:\.\d+)?)'
+        r'[\s\S]{0,200}?'
+        r'(?:\1)[_\-]?end["\s:=,]+(\d+(?:\.\d+)?)',
+        re.IGNORECASE,
+    )
+    for m in pair_re.finditer(html):
+        kind = _coerce_kind(m.group(1))
+        if not kind or kind in seen:
+            continue
+        try:
+            start = float(m.group(2))
+            end = float(m.group(3))
+        except ValueError:
+            continue
+        if end > start:
+            out.append({"kind": kind, "start": start, "end": end})
+            seen.add(kind)
+
+    return out
+
+
+def extract_chapters_from_hls(stream_url: str, refer: str) -> list[dict[str, Any]]:
+    """Look for HLS DATERANGE entries that the upstream tagged as a
+    skippable section. The HLS spec lets servers attach arbitrary
+    X-attributes; many "skip-aware" CDNs use X-START / X-END or
+    DURATION alongside a CLASS hint."""
+    out: list[dict[str, Any]] = []
+    if not stream_url:
+        return out
+    try:
+        text, _, _ = fetch(stream_url, {"Referer": refer or stream_url})
+    except Exception:
+        return out
+    if not text or "#EXT-X-DATERANGE" not in text:
+        return out
+    # If this was a master playlist, dive into the first variant for
+    # DATERANGE info (master playlists rarely carry chapters).
+    if "#EXT-X-STREAM-INF" in text and "#EXT-X-DATERANGE" not in text.split(
+        "#EXT-X-STREAM-INF", 1
+    )[0]:
+        for line in text.splitlines():
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            try:
+                text, _, _ = fetch(absolute(s, stream_url),
+                                   {"Referer": refer or stream_url})
+            except Exception:
+                return out
+            break
+    seen: set[str] = set()
+    for line in text.splitlines():
+        if not line.startswith("#EXT-X-DATERANGE"):
+            continue
+        attrs: dict[str, str] = {}
+        for kv in re.findall(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)', line):
+            attrs[kv[0]] = kv[1].strip('"')
+        cls = attrs.get("CLASS", "")
+        kind = _coerce_kind(cls) or _coerce_kind(attrs.get("ID", ""))
+        if not kind or kind in seen:
+            continue
+        try:
+            cstart = float(attrs.get("X-START", attrs.get("X-COM-INTRO-START", "0")) or 0)
+            x_end = attrs.get("X-END", attrs.get("X-COM-INTRO-END", ""))
+            if x_end:
+                cend = float(x_end)
+            else:
+                cend = cstart + float(attrs.get("DURATION", "0") or 0)
+        except ValueError:
+            continue
+        if cend > cstart:
+            out.append({"kind": kind, "start": cstart, "end": cend})
+            seen.add(kind)
+    return out
+
+
 def make_result(url: str, refer: str = "", html: str = "",
                 stream_format: str | None = None) -> dict[str, Any] | None:
     if not url:
@@ -217,11 +547,20 @@ def make_result(url: str, refer: str = "", html: str = "",
         except Exception:
             pass
 
+    chapters = extract_chapters_from_html(html) if html else []
+    if fmt == "hls" and not chapters:
+        try:
+            chapters = extract_chapters_from_hls(url, refer)
+        except Exception as exc:  # noqa: BLE001
+            LOG.debug("hls chapter probe failed for %s: %s", url, exc)
+            chapters = []
+
     return {
         "url": url,
         "streamFormat": fmt,
         "qualities": qualities,
         "subtitles": collect_subtitles(html) if html else [],
+        "chapters": chapters,
         "referer": refer_origin,
         "userAgent": UA,
     }
@@ -587,7 +926,7 @@ def _xpass_segments_look_like_video(master_text: str, master_url: str,
                 headers={"User-Agent": UA, "Referer": refer,
                          "Range": "bytes=0-15"},
             )
-            with urlopen(req, timeout=10) as resp:
+            with _active_opener().open(req, timeout=10) as resp:
                 head = resp.read(16)
                 ctype = (resp.headers.get("Content-Type") or "").lower()
         except Exception:
@@ -1504,7 +1843,7 @@ def _stream_is_playable(stream_url: str, refer: str) -> bool:
         try:
             req = Request(segs[idx], headers={"User-Agent": UA, "Referer": refer,
                                               "Range": "bytes=0-15"})
-            with urlopen(req, timeout=10) as resp:
+            with _active_opener().open(req, timeout=10) as resp:
                 head = resp.read(16)
                 ctype = (resp.headers.get("Content-Type") or "").lower()
         except Exception:
@@ -1616,13 +1955,23 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/providers":
             self._respond(200, {"providers": [needle for needle, _ in PROVIDERS]})
             return
-        if parsed.path == "/stream":
-            self._serve_stream(dict(urlparse.parse_qsl(parsed.query)))
-            return
-        if parsed.path != "/resolve":
-            self._respond(404, {"error": "not found"})
-            return
-        self._serve_resolve(dict(urlparse.parse_qsl(parsed.query)))
+        params = dict(urlparse.parse_qsl(parsed.query))
+        # Per-Roku cookie jar so concurrent devices don't trample each
+        # other's session state. cid falls back to the client's TCP peer
+        # address so older channel builds still get *some* isolation.
+        cid = params.get("cid") or self.client_address[0]
+        self._cid = cid
+        _set_active_opener(_opener_for(cid))
+        try:
+            if parsed.path == "/stream":
+                self._serve_stream(params)
+                return
+            if parsed.path != "/resolve":
+                self._respond(404, {"error": "not found"})
+                return
+            self._serve_resolve(params)
+        finally:
+            _clear_active_opener()
 
     def do_HEAD(self) -> None:  # noqa: N802
         self.do_GET()
@@ -1699,7 +2048,7 @@ class Handler(BaseHTTPRequestHandler):
 
         req = Request(target, headers=headers, method=self.command)
         try:
-            resp = urlopen(req, timeout=30)
+            resp = _active_opener().open(req, timeout=30)
         except HTTPError as e:
             LOG.warning("proxy HTTP %s on %s", e.code, target)
             self.send_response(e.code)
@@ -1858,7 +2207,11 @@ class Handler(BaseHTTPRequestHandler):
         # Already proxied? Don't double-wrap.
         if "/stream?" in target and target.startswith(self._public_base()):
             return target
-        qs = urlparse.urlencode({"u": target, "r": refer or "", "ua": ua or ""})
+        params: dict[str, str] = {"u": target, "r": refer or "", "ua": ua or ""}
+        cid = getattr(self, "_cid", "") or ""
+        if cid:
+            params["cid"] = cid
+        qs = urlparse.urlencode(params)
         return self._public_base() + "/stream?" + qs
 
     def _public_base(self) -> str:
@@ -1886,12 +2239,27 @@ def main() -> int:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument(
+        "--state-dir",
+        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "state"),
+        help="Directory for persisted resolver state (cookie cache).",
+    )
+    parser.add_argument(
+        "--no-cookie-cache",
+        action="store_true",
+        help="Disable persisting per-client cookie jars across restarts.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
+
+    if not args.no_cookie_cache:
+        cookie_path = os.path.join(args.state_dir, "cookies.pickle")
+        _start_cookie_persistence(cookie_path)
+        LOG.info("cookie cache: %s (flush every %ds)", cookie_path, CACHE_FLUSH_S)
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     LOG.info("listening on http://%s:%d", args.host, args.port)
@@ -1900,6 +2268,9 @@ def main() -> int:
         server.serve_forever()
     except KeyboardInterrupt:
         LOG.info("shutting down")
+    finally:
+        _COOKIE_FLUSH_STOP.set()
+        _save_cookie_cache()
     return 0
 
 

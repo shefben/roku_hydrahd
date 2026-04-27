@@ -7,6 +7,8 @@ sub init()
     m.kind = ""
     m.id = ""
     m.href = ""
+    m.movieProgress = invalid
+    m.seriesResume = invalid
 
     m.poster = m.top.findNode("poster")
     m.backdrop = m.top.findNode("backdrop")
@@ -102,6 +104,14 @@ sub onDetailResult()
     end if
     m.detail = res.detail
     paintDetail()
+    ' Continue Watching tiles set autoResume=true so the user goes
+    ' straight into playback. We hand off via onPlay() once paintDetail
+    ' has filled in seriesResume / movieProgress.
+    a = m.top.args
+    if a <> invalid and a.autoResume = true then
+        a.autoResume = false
+        onPlay()
+    end if
 end sub
 
 sub paintDetail()
@@ -148,16 +158,125 @@ sub paintDetail()
     ' Trust the kind we already detected in onArgs - the parsed `d.kind`
     ' just echoes whichever fetcher was called.
     if m.kind = "tv" then
-        m.actions.buttons = ["Seasons"]
+        m.seriesResume = computeSeriesResume()
+        if m.seriesResume <> invalid then
+            label = "Resume S" + m.seriesResume.ep.season.ToStr() + "E" + m.seriesResume.ep.episode.ToStr()
+            m.actions.buttons = [label, "Seasons", favButtonLabel()]
+        else
+            m.actions.buttons = ["Seasons", favButtonLabel()]
+        end if
         if d.seasons <> invalid and d.seasons.Count() > 0 then
             renderSeasons()
             m.seasonGroup.visible = true
         end if
     else
-        m.actions.buttons = ["Play", "Choose Mirror"]
+        m.movieProgress = W_GetMovieProgress(d.imdb, d.href)
+        rp = W_ResumePosition(m.movieProgress)
+        if rp > 0 then
+            m.actions.buttons = ["Resume " + W_FormatTime(rp), "Restart", "Choose Mirror", favButtonLabel()]
+        else
+            m.actions.buttons = ["Play", "Choose Mirror", favButtonLabel()]
+        end if
     end if
     m.actions.setFocus(true)
 end sub
+
+' Star icon (filled or outlined) reflecting the current saved state.
+function favButtonLabel() as String
+    if m.detail = invalid then return "Save to List"
+    if W_IsFavorite(m.detail.imdb, m.detail.href) then
+        return "* Saved"
+    end if
+    return "+ Save to List"
+end function
+
+' Toggles favorite state and re-paints the button label without
+' rebuilding the whole action bar.
+sub toggleFavorite()
+    if m.detail = invalid then return
+    if W_IsFavorite(m.detail.imdb, m.detail.href) then
+        W_RemoveFavorite(m.detail.imdb, m.detail.href)
+        m.statusNode.text = "Removed from My List."
+    else
+        W_AddFavorite({
+            title:  m.detail.title
+            poster: m.detail.poster
+            href:   m.detail.href
+            imdb:   m.detail.imdb
+            tmdb:   m.detail.tmdb
+            kind:   m.kind
+        })
+        m.statusNode.text = "Added to My List."
+    end if
+    btns = m.actions.buttons
+    if btns <> invalid and btns.Count() > 0 then
+        btns[btns.Count() - 1] = favButtonLabel()
+        m.actions.buttons = btns
+    end if
+end sub
+
+' Find an episode (and its season index) by season/episode number.
+function findEpisodeByNum(season as Integer, episode as Integer) as Object
+    if m.detail = invalid or m.detail.seasons = invalid then return invalid
+    for si = 0 to m.detail.seasons.Count() - 1
+        s = m.detail.seasons[si]
+        for ei = 0 to s.episodes.Count() - 1
+            e = s.episodes[ei]
+            if e.season = season and e.episode = episode then
+                return { seasonIdx: si, episodeIdx: ei, ep: e }
+            end if
+        end for
+    end for
+    return invalid
+end function
+
+' Episode that follows (season, episode) in show order, or invalid if the
+' user already finished the very last one.
+function findNextEpisode(season as Integer, episode as Integer) as Object
+    cur = findEpisodeByNum(season, episode)
+    if cur = invalid then return invalid
+    si = cur.seasonIdx
+    ei = cur.episodeIdx + 1
+    s = m.detail.seasons[si]
+    if ei < s.episodes.Count() then
+        return { seasonIdx: si, episodeIdx: ei, ep: s.episodes[ei] }
+    end if
+    if si + 1 < m.detail.seasons.Count() then
+        ns = m.detail.seasons[si + 1]
+        if ns.episodes.Count() > 0 then
+            return { seasonIdx: si + 1, episodeIdx: 0, ep: ns.episodes[0] }
+        end if
+    end if
+    return invalid
+end function
+
+' For a TV series, decide which episode to highlight / resume:
+'   - If the last-watched episode wasn't finished -> resume that one.
+'   - If it was finished -> point at the next episode (with no resume offset).
+'   - If there's no history -> invalid.
+function computeSeriesResume() as Object
+    if m.detail = invalid then return invalid
+    if m.detail.seasons = invalid or m.detail.seasons.Count() = 0 then return invalid
+    sp = W_GetSeriesProgress(m.detail.imdb, m.detail.href)
+    if sp = invalid then return invalid
+    season = W_AsInt(sp.season)
+    episode = W_AsInt(sp.episode)
+    target = findEpisodeByNum(season, episode)
+    if target = invalid then return invalid
+    if W_AsBool(sp.done) then
+        nextT = findNextEpisode(season, episode)
+        if nextT <> invalid then
+            nextT.resumePos = 0
+            return nextT
+        end if
+        ' Series fully watched - leave the highlight on the finale.
+        target.resumePos = 0
+        return target
+    end if
+    epEntry = W_GetEpisodeProgress(m.detail.imdb, m.detail.href, season, episode)
+    target.resumePos = W_ResumePosition(epEntry)
+    return target
+end function
 
 function joinWithComma(arr as Object) as String
     out = ""
@@ -169,6 +288,8 @@ function joinWithComma(arr as Object) as String
 end function
 
 sub renderSeasons()
+    initial = 0
+    if m.seriesResume <> invalid then initial = m.seriesResume.seasonIdx
     root = createObject("roSGNode", "ContentNode")
     for i = 0 to m.detail.seasons.Count() - 1
         ch = root.createChild("ContentNode")
@@ -176,8 +297,9 @@ sub renderSeasons()
     end for
     m.seasonRow.content = root
     if root.getChildCount() > 0 then
-        m.seasonRow.jumpToItem = 0
-        selectSeason(0)
+        if initial < 0 or initial >= root.getChildCount() then initial = 0
+        m.seasonRow.jumpToItem = initial
+        selectSeason(initial)
     end if
 end sub
 
@@ -189,15 +311,45 @@ end function
 sub onActionSelected()
     if m.actions.buttonSelected = invalid then return
     idx = m.actions.buttonSelected
-    if m.kind = "tv" then
-        ' TV shows have a single "Seasons" button - just focus the season picker.
-        onShowSeasons()
+    btns = m.actions.buttons
+    ' The Save-to-List / Saved button is always last in the row, so the
+    ' fav handler short-circuits any kind-specific dispatch below.
+    if btns <> invalid and idx = btns.Count() - 1 then
+        toggleFavorite()
         return
     end if
-    if idx = 0 then
-        onPlay()
-    else if idx = 1 then
-        onMirrors()
+    if m.kind = "tv" then
+        if m.seriesResume <> invalid then
+            ' Buttons: [Resume S?E?, Seasons, Save]
+            if idx = 0 then
+                openMirrorPicker(m.seriesResume.ep, m.seriesResume.resumePos)
+            else if idx = 1 then
+                onShowSeasons()
+            end if
+        else
+            ' Buttons: [Seasons, Save]
+            if idx = 0 then onShowSeasons()
+        end if
+        return
+    end if
+    rp = 0
+    if m.movieProgress <> invalid then rp = W_ResumePosition(m.movieProgress)
+    if rp > 0 then
+        ' Buttons: [Resume HH:MM, Restart, Choose Mirror, Save]
+        if idx = 0 then
+            openMirrorPicker(invalid, rp)
+        else if idx = 1 then
+            openMirrorPicker(invalid, 0)
+        else if idx = 2 then
+            openMirrorPicker(invalid, rp)
+        end if
+    else
+        ' Buttons: [Play, Choose Mirror, Save]
+        if idx = 0 then
+            openMirrorPicker(invalid, 0)
+        else if idx = 1 then
+            openMirrorPicker(invalid, 0)
+        end if
     end if
 end sub
 
@@ -236,8 +388,15 @@ sub selectSeason(idx as Integer)
     if m.detail.poster <> invalid then poster = m.detail.poster
     desc = ""
     if m.detail.description <> invalid then desc = m.detail.description
+
+    targetEpIdx = -1
+    if m.seriesResume <> invalid and m.seriesResume.seasonIdx = idx then
+        targetEpIdx = m.seriesResume.episodeIdx
+    end if
+
     root = createObject("roSGNode", "ContentNode")
-    for each ep in s.episodes
+    for ei = 0 to s.episodes.Count() - 1
+        ep = s.episodes[ei]
         cell = root.createChild("ContentNode")
         cell.title = ep.name
         cell.shortDescriptionLine2 = "S" + ep.season.ToStr() + " - E" + ep.episode.ToStr()
@@ -248,8 +407,32 @@ sub selectSeason(idx as Integer)
         cell.HDPosterUrl = poster
         cell.SDPosterUrl = poster
         cell.id = ep.slug + "|" + ep.season.ToStr() + "|" + ep.episode.ToStr()
+        ' EpisodeItem reads `releaseDate` as a watched-state badge:
+        '   "current:<label>" - up-next or resume target
+        '   "watched"         - finished
+        '   "partial:<time>"  - started but not finished
+        marker = ""
+        epEntry = W_GetEpisodeProgress(m.detail.imdb, m.detail.href, ep.season, ep.episode)
+        if ei = targetEpIdx then
+            rp = 0
+            if m.seriesResume <> invalid and m.seriesResume.resumePos <> invalid then
+                rp = m.seriesResume.resumePos
+            end if
+            if rp > 0 then
+                marker = "current:Resume " + W_FormatTime(rp)
+            else
+                marker = "current:Up next"
+            end if
+        else if epEntry <> invalid and W_AsBool(epEntry.done) then
+            marker = "watched"
+        else if epEntry <> invalid then
+            rp2 = W_ResumePosition(epEntry)
+            if rp2 > 0 then marker = "partial:" + W_FormatTime(rp2)
+        end if
+        cell.releaseDate = marker
     end for
     m.epGrid.content = root
+    if targetEpIdx >= 0 then m.epGrid.jumpToItem = targetEpIdx
     m.seasonGroup.visible = true
 end sub
 
@@ -260,30 +443,47 @@ sub onEpisodeSelected()
     s = m.detail.seasons[m.activeSeason]
     if idx < 0 or idx >= s.episodes.Count() then return
     ep = s.episodes[idx]
-    openMirrorPicker(ep)
+    openMirrorPicker(ep, 0)
 end sub
 
 sub onPlay()
     if m.detail = invalid then return
-    if m.detail.kind = "movie" then
-        openMirrorPicker(invalid)
-    else
-        if m.detail.seasons.Count() = 0 then
-            m.statusNode.text = "No episodes available."
-            return
-        end if
-        s = m.detail.seasons[m.detail.seasons.Count() - 1]
-        ep = s.episodes[s.episodes.Count() - 1]
-        openMirrorPicker(ep)
+    if m.kind = "movie" then
+        rp = 0
+        if m.movieProgress <> invalid then rp = W_ResumePosition(m.movieProgress)
+        openMirrorPicker(invalid, rp)
+        return
     end if
+    if m.detail.seasons.Count() = 0 then
+        m.statusNode.text = "No episodes available."
+        return
+    end if
+    if m.seriesResume <> invalid then
+        openMirrorPicker(m.seriesResume.ep, m.seriesResume.resumePos)
+        return
+    end if
+    s = m.detail.seasons[m.detail.seasons.Count() - 1]
+    ep = s.episodes[s.episodes.Count() - 1]
+    openMirrorPicker(ep, 0)
 end sub
 
 sub onMirrors()
     onPlay()
 end sub
 
-sub openMirrorPicker(ep as Object)
+sub openMirrorPicker(ep as Object, startPos as Integer)
     if m.detail = invalid then return
+    ' If no explicit resume position was passed (e.g. user picked an episode
+    ' from the grid), still honor any progress we have for that episode.
+    if startPos = 0 and ep <> invalid then
+        epEntry = W_GetEpisodeProgress(m.detail.imdb, m.detail.href, ep.season, ep.episode)
+        startPos = W_ResumePosition(epEntry)
+    else if startPos = 0 and ep = invalid and m.kind = "movie" then
+        if m.movieProgress = invalid then
+            m.movieProgress = W_GetMovieProgress(m.detail.imdb, m.detail.href)
+        end if
+        startPos = W_ResumePosition(m.movieProgress)
+    end if
     args = {
         kind: m.detail.kind
         title: m.detail.title
@@ -319,6 +519,7 @@ sub openMirrorPicker(ep as Object)
             args.episodeQueueIndex = startIdx
         end if
     end if
+    if startPos > 0 then args.startPosition = startPos
     m.top.requestNav = {
         action: "open"
         view: "MirrorPicker"

@@ -8,6 +8,7 @@
 
     <script type="text/brightscript" uri="pkg:/components/DetailsView.brs" />
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
 
     <children>
         <Poster id="backdrop" translation="[0,0]" width="1920" height="540" loadDisplayMode="scaleToFill"

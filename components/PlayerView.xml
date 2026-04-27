@@ -8,11 +8,23 @@
 
     <script type="text/brightscript" uri="pkg:/components/PlayerView.brs" />
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
 
     <children>
         <Video id="video" width="1920" height="1080" enableUI="true" enableTrickPlay="true" />
 
         <Rectangle id="overlayBg" width="1920" height="1080" color="0x000000aa" visible="false" />
+
+        <!-- Skip Intro / Skip Credits banner. Only appears when the
+             resolver returned chapter data for the current mirror and
+             the playhead is inside one of those windows. -->
+        <Group id="skipBanner" translation="[1430, 900]" visible="false">
+            <Rectangle id="skipBg" width="450" height="64" color="0x000000d4" />
+            <Rectangle id="skipBorder" width="450" height="64" color="0x00000000" />
+            <Label id="skipLabel" translation="[20, 20]" width="410" height="24" text=""
+                   font="font:MediumBoldSystemFont" color="0xffd24aff"
+                   horizAlign="center" vertAlign="center" />
+        </Group>
 
         <LayoutGroup id="overlay" translation="[120, 120]" layoutDirection="vert" itemSpacings="[18]" visible="false">
             <Label id="title" text="" font="font:LargeBoldSystemFont" color="0xffffffff" width="1680" maxLines="1" />

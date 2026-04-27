@@ -8,6 +8,7 @@
 
     <script type="text/brightscript" uri="pkg:/components/MirrorPicker.brs" />
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
 
     <children>
         <Rectangle width="1920" height="1080" color="0x000000d4" />
