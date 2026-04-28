@@ -44,6 +44,24 @@ sub init()
     m.baseRow.setFocus(true)
 
     refresh()
+
+    ' Same focus-redirect pattern as the poster views: when MainScene
+    ' re-focuses the SettingsView root (e.g. after UP-to-nav / DOWN-back)
+    ' bounce focus down to the first row so the arrow keys do something.
+    ' If the URL keyboard is open we land on it instead, so the user
+    ' doesn't lose their typing.
+    m.top.observeField("focusedChild", "onSelfFocusChanged")
+end sub
+
+sub onSelfFocusChanged()
+    fc = m.top.focusedChild
+    if fc = invalid then return
+    if not fc.isSameNode(m.top) then return
+    if m.urlEditGroup <> invalid and m.urlEditGroup.visible then
+        m.urlKb.setFocus(true)
+        return
+    end if
+    m.baseRow.setFocus(true)
 end sub
 
 sub refresh()

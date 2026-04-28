@@ -11,7 +11,34 @@ sub init()
     m.grid.itemComponentName = "MirrorItem"
     m.grid.observeField("itemSelected", "onMirrorSelected")
     m.grid.setFocus(true)
+
+    ' Bounce focus down to the mirror grid whenever MainScene refocuses
+    ' the view root. Without this the user is stranded on a focusless
+    ' Group after the UP-to-nav / DOWN-back dance.
+    m.top.observeField("focusedChild", "onSelfFocusChanged")
 end sub
+
+sub onSelfFocusChanged()
+    fc = m.top.focusedChild
+    if fc = invalid then return
+    if not fc.isSameNode(m.top) then return
+    if m.grid <> invalid and m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
+        m.grid.setFocus(true)
+    end if
+end sub
+
+function onKeyEvent(key as String, press as Boolean) as Boolean
+    if not press then return false
+    ' MarkupGrid swallows UP at top row in some firmwares; this handler
+    ' lets the user always escape back to the top nav. Returning false
+    ' bubbles to MainScene which jumps focus to the active nav button.
+    if key = "up" and m.grid.hasFocus() then
+        idx = m.grid.itemFocused
+        if idx = invalid then idx = 0
+        if idx < m.grid.numColumns then return false
+    end if
+    return false
+end function
 
 sub onArgs()
     a = m.top.args

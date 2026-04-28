@@ -129,11 +129,12 @@ end function
 
 ' --- Subnet scan fallback -------------------------------------------
 
-' Asynchronously fires GET http://<x.y.z.N>:<port>/health for every
-' host in our /24 and returns the base URL of the first responder.
-'
-' All transfers share one message port; we cancel anything still
-' outstanding when we either get a hit or the deadline expires.
+' Walks the /24 around our own IP in small batches asking each host
+' for /health on <port>. Roku has a tight per-channel cap on
+' simultaneous TCP sockets (~10-15) and exhausting it stalls every
+' subsequent HTTP call in the channel - so we cap the in-flight
+' batch and clean up between rounds rather than firing 254 transfers
+' at once.
 function trySubnetScan(timeoutMs as Integer, defaultPort as Integer) as String
     if defaultPort < 1 then defaultPort = 8787
     if timeoutMs < 500 then timeoutMs = 500
@@ -156,19 +157,35 @@ function trySubnetScan(timeoutMs as Integer, defaultPort as Integer) as String
     if base = "" then return ""
 
     portStr = defaultPort.ToStr()
+    batchSize = 8
+    perBatchMs = 350
+    deadline = CreateObject("roTimespan")
+    deadline.mark()
+
+    n = 1
+    while n <= 254 and deadline.totalMilliseconds() < timeoutMs
+        endN = n + batchSize - 1
+        if endN > 254 then endN = 254
+        hit = scanBatch(base, n, endN, portStr, perBatchMs)
+        if hit <> "" then return hit
+        n = endN + 1
+    end while
+    return ""
+end function
+
+' One batch of subnet probes. Spawns a small number of async transfers,
+' waits up to budgetMs for any 200, then cancels the rest and returns
+' (so the next batch starts with no in-flight sockets).
+function scanBatch(base as String, fromN as Integer, toN as Integer, portStr as String, budgetMs as Integer) as String
     msgPort = CreateObject("roMessagePort")
     transfers = []
     byId = {}
-
-    for n = 1 to 254
+    for n = fromN to toN
         candidate = "http://" + base + n.ToStr() + ":" + portStr
         x = CreateObject("roUrlTransfer")
         x.setMessagePort(msgPort)
         x.setUrl(candidate + "/health")
         x.enableEncodings(true)
-        ' Fast-fail any dead host: must transfer at least 1 byte/s for
-        ' the timeout window or the connection is aborted. We rely on
-        ' the wider deadline below for the absolute cap.
         x.setMinimumTransferRate(1, 1)
         if x.AsyncGetToString() then
             id = x.getIdentity()
@@ -180,9 +197,8 @@ function trySubnetScan(timeoutMs as Integer, defaultPort as Integer) as String
     deadline = CreateObject("roTimespan")
     deadline.mark()
     found = ""
-
-    while deadline.totalMilliseconds() < timeoutMs
-        remaining = timeoutMs - deadline.totalMilliseconds()
+    while deadline.totalMilliseconds() < budgetMs
+        remaining = budgetMs - deadline.totalMilliseconds()
         if remaining < 1 then exit while
         msg = wait(remaining, msgPort)
         if msg = invalid then exit while
@@ -197,9 +213,10 @@ function trySubnetScan(timeoutMs as Integer, defaultPort as Integer) as String
         end if
     end while
 
+    ' Cancel everything still pending so the OS-level socket pool is
+    ' clean before the next batch starts.
     for each x in transfers
         x.AsyncCancel()
     end for
-
     return found
 end function

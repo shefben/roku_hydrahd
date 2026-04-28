@@ -17,6 +17,19 @@ sub init()
     m.grid.observeField("itemFocused", "onItemFocused")
     m.sideMenu.observeField("command", "onSideMenuCommand")
     m.grid.setFocus(true)
+    ' Bounce self-focus down to the grid whenever MainScene refocuses
+    ' the view root (e.g. after the user comes back from the top nav).
+    ' Without this the user is stranded - arrows hit a dead Group.
+    m.top.observeField("focusedChild", "onSelfFocusChanged")
+end sub
+
+sub onSelfFocusChanged()
+    fc = m.top.focusedChild
+    if fc = invalid then return
+    if not fc.isSameNode(m.top) then return
+    if m.grid = invalid or m.grid.content = invalid then return
+    if m.grid.content.getChildCount() = 0 then return
+    m.grid.setFocus(true)
 end sub
 
 sub onSideMenuCommand()
@@ -122,6 +135,10 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             return false
         end if
     end if
+    ' Star button toggles favorite for the focused poster.
+    if key = "options" and m.grid.hasFocus() then
+        if toggleFavoriteAtFocus() then return true
+    end if
     ' LEFT at the leftmost column hands focus to the side drawer's
     ' collapsed strip. MarkupGrid only bubbles left when the focused
     ' cell is already at column 0.
@@ -137,6 +154,15 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         end if
     end if
     return false
+end function
+
+function toggleFavoriteAtFocus() as Boolean
+    idx = m.grid.itemFocused
+    if idx = invalid or idx < 0 then return false
+    if m.grid.content = invalid then return false
+    cell = m.grid.content.getChild(idx)
+    if cell = invalid then return false
+    return U_ToggleFavoriteForCell(cell, m.grid.content)
 end function
 
 sub onItemSelected()

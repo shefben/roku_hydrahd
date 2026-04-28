@@ -36,7 +36,7 @@
                 </Group>
 
                 <Group translation="[40, 0]">
-                    <Label id="resultTitle" translation="[0, 80]" text="Results" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                    <Label id="resultTitle" translation="[0, 80]" text="" font="font:MediumBoldSystemFont" color="0xffffffff" visible="false" />
                     <MarkupGrid id="grid" translation="[0, 110]"
                                 itemSize="[230, 380]"
                                 numColumns="3"

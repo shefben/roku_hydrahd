@@ -48,7 +48,7 @@
                         numColumns="1"
                         numRows="3"
                         itemSpacing="[0, 12]"
-                        vertFocusAnimationStyle="fixedFocusWrap"
+                        vertFocusAnimationStyle="floatingFocus"
                         drawFocusFeedback="true"
                         drawFocusFeedbackOnTop="true" />
         </Group>

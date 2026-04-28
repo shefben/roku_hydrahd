@@ -13,10 +13,31 @@ sub init()
     m.continueRowIdx = -1
     m.sideMenu.observeField("command", "onSideMenuCommand")
 
+    ' MainScene.focusActiveChild() calls setFocus(true) on the HomeView
+    ' Group root whenever the user comes back from the top nav (e.g.
+    ' presses DOWN from the nav bar). Focus then sits on this Group
+    ' itself, not on the rowlist - arrows do nothing until we forward
+    ' it. Observing focusedChild and bouncing self-focus down to
+    ' m.rows fixes the "stuck on first poster" bug and also makes
+    ' LEFT-at-col-0 (sidebar handoff in onKeyEvent) reliable.
+    m.top.observeField("focusedChild", "onSelfFocusChanged")
+
     m.task = createObject("roSGNode", "HomeTask")
     m.task.observeField("result", "onResult")
     m.top.loading = true
     m.task.control = "RUN"
+end sub
+
+sub onSelfFocusChanged()
+    fc = m.top.focusedChild
+    if fc = invalid then return
+    if not fc.isSameNode(m.top) then return
+    ' Don't try to bounce focus before the rowlist has any content -
+    ' setFocus on an empty RowList is a no-op and we'd fire a second
+    ' focusedChild change for nothing. After content arrives onResult
+    ' calls setFocus directly anyway.
+    if m.rows = invalid or m.rows.content = invalid then return
+    m.rows.setFocus(true)
 end sub
 
 ' Forward navigation actions to MainScene; restore focus on collapse.
@@ -168,6 +189,12 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         retryLoad()
         return true
     end if
+    ' Star button (`*` on the Roku remote, "options" event) toggles the
+    ' favorite state of the focused poster. Star indicators on every
+    ' duplicate cell update via U_BumpAllCellsByUrl.
+    if key = "options" and m.rows.hasFocus() then
+        if toggleFavoriteAtFocus() then return true
+    end if
     ' LEFT at the leftmost column of the row hands focus to the side
     ' drawer's collapsed strip. RowList absorbs left between columns
     ' and only bubbles when there's nowhere left to go.
@@ -181,4 +208,16 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         end if
     end if
     return false
+end function
+
+function toggleFavoriteAtFocus() as Boolean
+    sel = m.rows.rowItemFocused
+    if sel = invalid or sel.Count() < 2 then return false
+    rowIdx = sel[0]
+    colIdx = sel[1]
+    rowContent = m.rows.content.getChild(rowIdx)
+    if rowContent = invalid then return false
+    cell = rowContent.getChild(colIdx)
+    if cell = invalid then return false
+    return U_ToggleFavoriteForCell(cell, m.rows.content)
 end function

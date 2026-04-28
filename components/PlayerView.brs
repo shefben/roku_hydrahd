@@ -60,6 +60,40 @@ sub init()
     m.activeChapter = invalid
 
     applyCcGlobal()
+
+    ' If MainScene happens to land focus on this view's root (e.g. the
+    ' user pressed BACK out of the resolver/MirrorPicker spinner before
+    ' "playing" state arrived) we redirect to whichever element makes
+    ' sense for the current state - the open panel, the action bar, or
+    ' the video itself.
+    m.top.observeField("focusedChild", "onSelfFocusChanged")
+end sub
+
+sub onSelfFocusChanged()
+    fc = m.top.focusedChild
+    if fc = invalid then return
+    if not fc.isSameNode(m.top) then return
+    if m.openPanel = "quality" then
+        m.qualityRow.setFocus(true)
+        return
+    end if
+    if m.openPanel = "cc" then
+        m.ccRow.setFocus(true)
+        return
+    end if
+    if m.openPanel = "ccStyle" then
+        m.ccStyleRow.setFocus(true)
+        return
+    end if
+    if m.openPanel = "audio" then
+        m.audioRow.setFocus(true)
+        return
+    end if
+    if m.overlay <> invalid and m.overlay.visible then
+        m.actionBar.setFocus(true)
+        return
+    end if
+    if m.video <> invalid then m.video.setFocus(true)
 end sub
 
 sub onArgs()
@@ -219,22 +253,22 @@ function tryAutoAdvance() as Boolean
 end function
 
 sub onVideoPosition()
-    pos = W_AsInt(m.video.position)
-    updateSkipBanner(pos)
+    posSec = W_AsInt(m.video.position)
+    updateSkipBanner(posSec)
     ' Save the very first heartbeat (so a quick exit still records something),
     ' then throttle to once every 5s while playing.
     if not m.progressSaved then
         saveProgress(false)
         return
     end if
-    if Abs(pos - m.lastSavedPos) >= 5 then saveProgress(false)
+    if Abs(posSec - m.lastSavedPos) >= 5 then saveProgress(false)
 end sub
 
 ' Show the bottom-right skip banner whenever the playhead falls inside
 ' a chapter the resolver tagged as intro / outro. We never invent
 ' chapter data, so an empty m.chapters keeps the banner permanently
 ' hidden and the user gets a totally normal player.
-sub updateSkipBanner(pos as Integer)
+sub updateSkipBanner(posSec as Integer)
     if m.chapters = invalid or m.chapters.Count() = 0 then
         if m.activeChapter <> invalid or m.skipBanner.visible then
             m.activeChapter = invalid
@@ -246,7 +280,7 @@ sub updateSkipBanner(pos as Integer)
     for each ch in m.chapters
         cs = W_AsInt(ch.start)
         ce = W_AsInt(ch.end)
-        if pos >= cs and pos < ce then
+        if posSec >= cs and posSec < ce then
             hit = ch
             exit for
         end if
@@ -304,12 +338,12 @@ end sub
 sub saveProgress(forceFinished as Boolean)
     a = m.top.args
     if a = invalid then return
-    pos = W_AsInt(m.video.position)
+    posSec = W_AsInt(m.video.position)
     dur = W_AsInt(m.video.duration)
-    if forceFinished and dur > 0 then pos = dur
-    if pos <= 0 and not forceFinished then return
+    if forceFinished and dur > 0 then posSec = dur
+    if posSec <= 0 and not forceFinished then return
 
-    m.lastSavedPos = pos
+    m.lastSavedPos = posSec
     m.progressSaved = true
 
     imdb = ""
@@ -342,9 +376,9 @@ sub saveProgress(forceFinished as Boolean)
         if a.episode.slug <> invalid then slug = a.episode.slug
         name = ""
         if a.episode.name <> invalid then name = a.episode.name
-        W_SaveEpisodeProgress(imdb, href, a.episode.season, a.episode.episode, pos, dur, slug, name)
+        W_SaveEpisodeProgress(imdb, href, a.episode.season, a.episode.episode, posSec, dur, slug, name)
     else
-        W_SaveMovieProgress(imdb, href, pos, dur)
+        W_SaveMovieProgress(imdb, href, posSec, dur)
     end if
 end sub
 

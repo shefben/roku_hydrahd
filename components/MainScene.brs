@@ -174,15 +174,9 @@ end function
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
 
-    ' OPTIONS (the * button on the Roku remote) is a quick shortcut to Settings.
-    if key = "options" then
-        m.activeNavIndex = m.navTabs.Count() - 1
-        m.navButtons[m.activeNavIndex].setFocus(true)
-        m.viewStack = []
-        pushView("SettingsView", invalid)
-        focusActiveChild()
-        return true
-    end if
+    ' OPTIONS (`*` on the Roku remote) is reserved for the active
+    ' view: poster grids use it to toggle favorites, DetailsView uses
+    ' it as a shortcut for Save-to-List. We don't intercept it here.
 
     if key = "back" then
         if m.viewStack.Count() > 1 then

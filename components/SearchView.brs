@@ -5,6 +5,12 @@ sub init()
     m.items = []
     m.lastQuery = ""
     m.resultsMode = false
+    ' Set true by onSearchClick / onChipPressed before runQuery, then
+    ' consumed in onResult. Tells onResult whether the user committed
+    ' to a search (we should jump to the grid) vs. typed and paused
+    ' (we keep focus on the keyboard unless the on-screen query exactly
+    ' matches the query that just returned).
+    m.autoFocusOnResult = false
 
     m.kb = m.top.findNode("kb")
     m.grid = m.top.findNode("grid")
@@ -47,6 +53,23 @@ sub init()
     m.focusTimer.repeat = false
     m.focusTimer.observeField("fire", "grabKeyboardFocus")
     m.focusTimer.control = "start"
+    ' Same focus-redirect pattern as the other views: when MainScene
+    ' re-focuses the SearchView root (e.g. after returning from the
+    ' top nav) we bounce focus down so arrows actually do something.
+    ' If results are visible we land on the grid; otherwise the
+    ' keyboard.
+    m.top.observeField("focusedChild", "onSelfFocusChanged")
+end sub
+
+sub onSelfFocusChanged()
+    fc = m.top.focusedChild
+    if fc = invalid then return
+    if not fc.isSameNode(m.top) then return
+    if m.resultsMode and m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
+        m.grid.setFocus(true)
+    else
+        m.kb.setFocus(true)
+    end if
 end sub
 
 sub grabKeyboardFocus()
@@ -81,11 +104,24 @@ sub onTextChange()
 end sub
 
 sub onDebounce()
+    ' Debounced (auto) search - keep focus on the keyboard unless the
+    ' user has fully paused typing.
     runQuery()
 end sub
 
 sub onSearchClick()
+    ' Explicit Search button press - the user expects to land on the
+    ' results, even if the query already ran on debounce. If runQuery
+    ' is a no-op (same query) the existing grid is still good; just
+    ' move focus there.
+    m.autoFocusOnResult = true
     runQuery()
+    if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
+        m.autoFocusOnResult = false
+        m.grid.jumpToItem = 0
+        m.grid.setFocus(true)
+        showResults()
+    end if
 end sub
 
 sub runQuery()
@@ -108,6 +144,8 @@ sub onResult()
         m.empty.text = "No results for: " + Chr(34) + m.lastQuery + Chr(34)
         m.empty.visible = true
         m.grid.content = invalid
+        m.resultTitle.visible = false
+        m.autoFocusOnResult = false
         return
     end if
     m.empty.visible = false
@@ -128,10 +166,25 @@ sub onResult()
     end for
     m.grid.content = root
     m.resultTitle.text = m.items.Count().ToStr() + " results"
+    m.resultTitle.visible = true
     ' Now that the user got real results, remember the query and
     ' refresh the chip row so it's there next time they come back.
     W_PushSearchQuery(m.lastQuery)
     renderChips()
+    ' Auto-focus the result grid only if we're sure the user is done
+    ' typing - either they pressed Search/chip explicitly (m.autoFocusOnResult
+    ' set by those handlers) or the on-screen text matches the query
+    ' that just returned (i.e. they paused, debounce fired, results
+    ' arrived for what's actually on screen). Otherwise we leave focus
+    ' on the keyboard so the next keystroke isn't sent to a poster.
+    typedText = U_Trim(m.kb.text)
+    userPaused = (typedText = m.lastQuery)
+    if m.autoFocusOnResult or userPaused then
+        m.autoFocusOnResult = false
+        m.grid.jumpToItem = 0
+        m.grid.setFocus(true)
+        showResults()
+    end if
 end sub
 
 sub onItemSelected()
@@ -182,6 +235,7 @@ sub onChipPressed(event as Object)
     if q = invalid or q = "" then return
     m.kb.text = q
     m.lastQuery = ""
+    m.autoFocusOnResult = true
     runQuery()
     if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
         m.grid.setFocus(true)
@@ -298,11 +352,32 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         m.kb.setFocus(true)
         return true
     end if
+    ' DOWN from the Search button is the secondary path to the grid -
+    ' the keyboard wraps RIGHT internally so we give the user another
+    ' obvious way out (the auto-focus on result is the primary one).
+    if key = "down" and m.searchBtn.hasFocus() then
+        if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
+            m.grid.setFocus(true)
+            showResults()
+            return true
+        end if
+        return true
+    end if
     if key = "right" and (m.kb.hasFocus() or m.searchBtn.hasFocus()) then
         if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
             m.grid.setFocus(true)
             showResults()
             return true
+        end if
+    end if
+    ' Star toggles favorite for the focused result poster.
+    if key = "options" and m.grid.hasFocus() then
+        idx = m.grid.itemFocused
+        if idx <> invalid and idx >= 0 and m.grid.content <> invalid then
+            cell = m.grid.content.getChild(idx)
+            if cell <> invalid then
+                if U_ToggleFavoriteForCell(cell, m.grid.content) then return true
+            end if
         end if
     end if
     ' Left from the leftmost grid column bubbles up to here (MarkupGrid

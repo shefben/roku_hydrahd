@@ -18,7 +18,7 @@
                  rowItemSize="[[220, 380]]"
                  rowItemSpacing="[[20, 0]]"
                  rowSpacings="[40]"
-                 rowFocusAnimationStyle="fixedFocusWrap"
+                 rowFocusAnimationStyle="fixedFocus"
                  vertFocusAnimationStyle="floatingFocus"
                  showRowLabel="[true]"
                  showRowCounter="[false]"

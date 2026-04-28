@@ -318,7 +318,9 @@ In the browse / list / search / details views:
 - `Up` from content - jump to top nav bar
 - `Left` from leftmost column on Home / Movies / TV / Trending -
   highlight the side drawer; OK to expand
-- `*` (Options) - jump to Settings from anywhere
+- `*` (Options) - toggle favorite on the focused poster (or, on the
+  Details page, equivalent to Save-to-List). A gold star appears on
+  every cell where that title shows up.
 
 In the player:
 

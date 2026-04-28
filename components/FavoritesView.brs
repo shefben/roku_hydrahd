@@ -7,6 +7,17 @@ sub init()
     m.grid.itemComponentName = "PosterItem"
     m.grid.observeField("itemSelected", "onItemSelected")
     refresh()
+    ' Bounce self-focus down to the grid when MainScene re-focuses the
+    ' view root (e.g. user came back from the top nav).
+    m.top.observeField("focusedChild", "onSelfFocusChanged")
+end sub
+
+sub onSelfFocusChanged()
+    fc = m.top.focusedChild
+    if fc = invalid then return
+    if fc.isSameNode(m.top) and m.grid.content <> invalid then
+        m.grid.setFocus(true)
+    end if
 end sub
 
 sub onArgs()
@@ -78,6 +89,28 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         idx = m.grid.itemFocused
         if idx = invalid then idx = 0
         if idx < m.grid.numColumns then return false
+    end if
+    ' Star toggles favorite. On this view that *removes* the title from
+    ' the list, so after the toggle we rebuild the grid and try to keep
+    ' focus on the surviving cell at the same index (or the previous
+    ' one if we just unstarred the last cell).
+    if key = "options" and m.grid.hasFocus() then
+        idx = m.grid.itemFocused
+        if idx = invalid or idx < 0 or m.grid.content = invalid then return false
+        cell = m.grid.content.getChild(idx)
+        if cell = invalid then return false
+        if not U_ToggleFavoriteForCell(cell, m.grid.content) then return false
+        ' Removed: list shrank. Rebuild and re-focus.
+        refresh()
+        if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
+            keep = idx
+            n = m.grid.content.getChildCount()
+            if keep >= n then keep = n - 1
+            if keep < 0 then keep = 0
+            m.grid.jumpToItem = keep
+            m.grid.setFocus(true)
+        end if
+        return true
     end if
     return false
 end function

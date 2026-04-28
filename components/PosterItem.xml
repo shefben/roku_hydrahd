@@ -6,6 +6,7 @@
         <field id="width" type="float" value="220" />
         <field id="height" type="float" value="370" />
     </interface>
+    <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
     <script type="text/brightscript">
         <![CDATA[
         sub init()
@@ -17,11 +18,26 @@
             m.frame = m.top.findNode("frame")
             m.progressTrack = m.top.findNode("progressTrack")
             m.progressBar = m.top.findNode("progressBar")
+            m.favStarBg = m.top.findNode("favStarBg")
+            m.favStar = m.top.findNode("favStar")
+            m.boundContent = invalid
         end sub
 
         sub onContent()
+            ' RowList recycles PosterItem instances across cells, so the
+            ' previous content's favBump observer must be released before
+            ' we attach to the new one - otherwise an unrelated toggle
+            ' elsewhere triggers a refresh on this (now-different) cell.
+            if m.boundContent <> invalid then
+                m.boundContent.unobserveField("favBump")
+            end if
             c = m.top.itemContent
-            if c = invalid then return
+            m.boundContent = c
+            if c = invalid then
+                m.favStarBg.visible = false
+                m.favStar.visible = false
+                return
+            end if
             m.poster.uri = c.HDPosterUrl
             m.title.text = c.title
             m.year.text = c.shortDescriptionLine2
@@ -62,6 +78,34 @@
                 m.progressTrack.visible = false
                 m.progressBar.visible = false
             end if
+            ' Favorite indicator. Parent views toggle the favorite via
+            ' Watchlist and bump c.favBump (added on demand) to force a
+            ' live refresh; without that field changing this same code
+            ' just runs on first content bind.
+            refreshFavoriteIndicator()
+            if not c.hasField("favBump") then
+                c.addField("favBump", "integer", true)
+            end if
+            c.observeField("favBump", "onFavBumpChanged")
+        end sub
+
+        sub onFavBumpChanged()
+            refreshFavoriteIndicator()
+        end sub
+
+        sub refreshFavoriteIndicator()
+            c = m.top.itemContent
+            if c = invalid then
+                m.favStarBg.visible = false
+                m.favStar.visible = false
+                return
+            end if
+            href = ""
+            if c.url <> invalid then href = c.url
+            isFav = false
+            if href <> "" then isFav = W_IsFavorite("", href)
+            m.favStarBg.visible = isFav
+            m.favStar.visible = isFav
         end sub
 
         sub onFocus()
@@ -81,6 +125,10 @@
         <Poster id="poster" width="220" height="330" translation="[0,0]" loadDisplayMode="scaleToZoom"
                 failedBitmapUri="pkg:/images/placeholder.png" loadingBitmapUri="pkg:/images/placeholder.png" />
         <Label id="badge" translation="[8, 8]" text="" font="font:SmallestBoldSystemFont" color="0xffffffff" />
+        <Rectangle id="favStarBg" translation="[184, 4]" width="32" height="32" color="0x000000c0" visible="false" />
+        <Label id="favStar" translation="[184, 2]" width="32" height="32" text="★"
+               font="font:LargeBoldSystemFont" color="0xffd24aff"
+               horizAlign="center" vertAlign="center" visible="false" />
         <Label id="rating" translation="[8, 300]" text="" font="font:SmallestBoldSystemFont" color="0xffd24aff" />
         <Rectangle id="progressTrack" translation="[0, 326]" width="220" height="4" color="0x000000aa" visible="false" />
         <Rectangle id="progressBar" translation="[0, 326]" width="0" height="4" color="0xff2424ff" visible="false" />

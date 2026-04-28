@@ -62,10 +62,10 @@ end sub
 
 ' Position is "essentially finished" when within 90 seconds of the end OR
 ' past 95% of total runtime - whichever the stream lets us detect first.
-function W_IsFinished(pos as Integer, dur as Integer) as Boolean
+function W_IsFinished(posSec as Integer, dur as Integer) as Boolean
     if dur <= 0 then return false
-    if pos >= dur - 90 then return true
-    if pos >= Int(dur * 0.95) then return true
+    if posSec >= dur - 90 then return true
+    if posSec >= Int(dur * 0.95) then return true
     return false
 end function
 
@@ -80,14 +80,14 @@ function W_GetMovieProgress(imdb as String, href as String) as Object
     return W_Read("m:" + W_ItemKey(imdb, href))
 end function
 
-sub W_SaveMovieProgress(imdb as String, href as String, pos as Integer, dur as Integer)
+sub W_SaveMovieProgress(imdb as String, href as String, posSec as Integer, dur as Integer)
     k = W_ItemKey(imdb, href)
     if k = "" then return
-    if pos < 0 then pos = 0
+    if posSec < 0 then posSec = 0
     W_Write("m:" + k, {
-        pos:  pos
+        pos:  posSec
         dur:  dur
-        done: W_IsFinished(pos, dur)
+        done: W_IsFinished(posSec, dur)
         ts:   CreateObject("roDateTime").AsSeconds()
     })
 end sub
@@ -98,14 +98,14 @@ function W_GetEpisodeProgress(imdb as String, href as String, season as Integer,
     return W_Read("e:" + W_ItemKey(imdb, href) + ":" + season.ToStr() + ":" + episode.ToStr())
 end function
 
-sub W_SaveEpisodeProgress(imdb as String, href as String, season as Integer, episode as Integer, pos as Integer, dur as Integer, slug as String, name as String)
+sub W_SaveEpisodeProgress(imdb as String, href as String, season as Integer, episode as Integer, posSec as Integer, dur as Integer, slug as String, name as String)
     k = W_ItemKey(imdb, href)
     if k = "" then return
-    if pos < 0 then pos = 0
-    done = W_IsFinished(pos, dur)
+    if posSec < 0 then posSec = 0
+    done = W_IsFinished(posSec, dur)
     ts = CreateObject("roDateTime").AsSeconds()
     W_Write("e:" + k + ":" + season.ToStr() + ":" + episode.ToStr(), {
-        pos:  pos
+        pos:  posSec
         dur:  dur
         done: done
         ts:   ts
@@ -115,7 +115,7 @@ sub W_SaveEpisodeProgress(imdb as String, href as String, season as Integer, epi
         episode: episode
         slug:    slug
         name:    name
-        pos:     pos
+        pos:     posSec
         dur:     dur
         done:    done
         ts:      ts
@@ -131,9 +131,9 @@ end function
 function W_ResumePosition(entry as Object) as Integer
     if entry = invalid then return 0
     if W_AsBool(entry.done) then return 0
-    pos = W_AsInt(entry.pos)
-    if pos < W_MinResumeSeconds() then return 0
-    return pos
+    posSec = W_AsInt(entry.pos)
+    if posSec < W_MinResumeSeconds() then return 0
+    return posSec
 end function
 
 ' Pretty-print "12m 34s" / "1h 02m" for status labels.
@@ -206,9 +206,9 @@ function W_ListInProgress(limit as Integer) as Object
             seen[itemKey] = true
             entry = W_Read(key)
             if entry <> invalid and not W_AsBool(entry.done) then
-                pos = W_AsInt(entry.pos)
+                posSec = W_AsInt(entry.pos)
                 dur = W_AsInt(entry.dur)
-                if pos >= W_MinResumeSeconds() then
+                if posSec >= W_MinResumeSeconds() then
                     ctx = W_GetContext(itemKey)
                     if ctx <> invalid then
                         item = {
@@ -219,9 +219,9 @@ function W_ListInProgress(limit as Integer) as Object
                             href:    ""
                             imdb:    ""
                             tmdb:    ""
-                            pos:     pos
+                            pos:     posSec
                             dur:     dur
-                            pct:     W_PercentOf(pos, dur)
+                            pct:     W_PercentOf(posSec, dur)
                             ts:      W_AsInt(entry.ts)
                         }
                         if ctx.title  <> invalid then item.title  = ctx.title
@@ -263,9 +263,9 @@ function W_ListInProgress(limit as Integer) as Object
     return out
 end function
 
-function W_PercentOf(pos as Integer, dur as Integer) as Integer
+function W_PercentOf(posSec as Integer, dur as Integer) as Integer
     if dur <= 0 then return 0
-    pct = Int((pos * 100) / dur)
+    pct = Int((posSec * 100) / dur)
     if pct < 0 then pct = 0
     if pct > 100 then pct = 100
     return pct

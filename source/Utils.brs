@@ -148,3 +148,76 @@ sub U_PrefSet(key as String, value as Dynamic)
     reg.Write(key, value.ToStr())
     reg.Flush()
 end sub
+
+' --- Favorite-toggle UI helpers -------------------------------------
+'
+' PosterItem watches each cell ContentNode's ``favBump`` field and
+' re-queries the favorite state whenever it changes. Views call
+' ``U_BumpCellFavorite(cell)`` after toggling a favorite so the star
+' overlay refreshes without rebuilding the whole grid. Multiple cells
+' can point at the same title (Continue Watching, My List, and a
+' provider row all stack the same href) so ``U_BumpAllCellsByUrl``
+' walks the content tree and bumps every match.
+
+sub U_BumpCellFavorite(cell as Object)
+    if cell = invalid then return
+    if not cell.hasField("favBump") then
+        cell.addField("favBump", "integer", true)
+    end if
+    cur = cell.favBump
+    if cur = invalid then cur = 0
+    cell.favBump = cur + 1
+end sub
+
+sub U_BumpAllCellsByUrl(content as Object, url as String)
+    if content = invalid or url = invalid or url = "" then return
+    n = content.getChildCount()
+    if n <= 0 then return
+    for i = 0 to n - 1
+        child = content.getChild(i)
+        if child <> invalid then
+            cu = child.url
+            if cu <> invalid and cu = url then
+                U_BumpCellFavorite(child)
+            end if
+            ' RowList content nests cells under row containers; recurse
+            ' so the bump reaches matches at any depth.
+            if child.getChildCount() > 0 then
+                U_BumpAllCellsByUrl(child, url)
+            end if
+        end if
+    end for
+end sub
+
+' Toggle favorite state for a focused poster cell and bump every cell
+' with the same URL so the star indicator refreshes everywhere it's
+' currently visible. Returns true on toggle, false if the cell wasn't
+' favoritable (no href/url).
+function U_ToggleFavoriteForCell(cell as Object, content as Object) as Boolean
+    if cell = invalid then return false
+    href = ""
+    if cell.url <> invalid then href = cell.url
+    if href = "" then return false
+    title = ""
+    if cell.title <> invalid then title = cell.title
+    poster = ""
+    if cell.HDPosterUrl <> invalid then poster = cell.HDPosterUrl
+    tmdb = ""
+    if cell.id <> invalid then tmdb = cell.id
+    kind = ""
+    if cell.contentType <> invalid then kind = cell.contentType
+    if W_IsFavorite("", href) then
+        W_RemoveFavorite("", href)
+    else
+        W_AddFavorite({
+            title:  title
+            poster: poster
+            href:   href
+            imdb:   ""
+            tmdb:   tmdb
+            kind:   kind
+        })
+    end if
+    U_BumpAllCellsByUrl(content, href)
+    return true
+end function

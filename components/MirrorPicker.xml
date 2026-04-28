@@ -22,7 +22,7 @@
                     numColumns="4"
                     numRows="6"
                     itemSpacing="[20, 16]"
-                    vertFocusAnimationStyle="fixedFocusWrap"
+                    vertFocusAnimationStyle="floatingFocus"
                     drawFocusFeedback="true"
                     drawFocusFeedbackOnTop="true" />
 

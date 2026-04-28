@@ -38,6 +38,23 @@ sub init()
     m.seasonRow.observeField("itemSelected", "onSeasonSelected")
 
     m.actions.setFocus(true)
+
+    ' MainScene's pushView+focusActiveChild lands focus on this Group's
+    ' root, which leaves arrow keys dead. Bounce down to the actions
+    ' bar (or, if the user was browsing the season grid before going
+    ' UP to nav, back to whichever grid is visible).
+    m.top.observeField("focusedChild", "onSelfFocusChanged")
+end sub
+
+sub onSelfFocusChanged()
+    fc = m.top.focusedChild
+    if fc = invalid then return
+    if not fc.isSameNode(m.top) then return
+    if m.epGrid <> invalid and m.epGrid.content <> invalid and m.seasonGroup <> invalid and m.seasonGroup.visible then
+        m.epGrid.setFocus(true)
+        return
+    end if
+    if m.actions <> invalid then m.actions.setFocus(true)
 end sub
 
 sub onArgs()
@@ -529,6 +546,12 @@ end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
+    ' Star button toggles Save-to-List from anywhere on this screen,
+    ' mirroring the favorite-toggle shortcut on the poster grids.
+    if key = "options" then
+        toggleFavorite()
+        return true
+    end if
     if key = "down" and m.actions.hasFocus() then
         if m.kind = "tv" then
             m.seasonGroup.visible = true
