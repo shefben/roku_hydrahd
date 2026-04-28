@@ -13,17 +13,15 @@
     <children>
         <Label id="header" translation="[60, 10]" text="" font="font:LargeBoldSystemFont" color="0xffffffff" />
         <MarkupGrid id="grid"
-                    translation="[60, 70]"
-                    itemSize="[230, 380]"
-                    numColumns="7"
-                    numRows="2"
-                    itemSpacing="[16, 24]"
+                    translation="[60, 60]"
+                    itemSize="[120, 210]"
+                    numColumns="14"
+                    numRows="4"
+                    itemSpacing="[10, 18]"
                     vertFocusAnimationStyle="floatingFocus"
                     drawFocusFeedback="true"
                     drawFocusFeedbackOnTop="true" />
         <Label id="empty" translation="[60, 400]" text="No results" font="font:MediumSystemFont"
                color="0x808080ff" visible="false" />
-
-        <SideMenu id="sideMenu" />
     </children>
 </component>

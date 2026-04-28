@@ -3,7 +3,6 @@
 sub init()
     m.rows = m.top.findNode("rows")
     m.empty = m.top.findNode("empty")
-    m.sideMenu = m.top.findNode("sideMenu")
     m.rows.observeField("rowItemSelected", "onItemSelected")
     m.rows.itemComponentName = "PosterItem"
     m.rows.setFocus(true)
@@ -11,7 +10,6 @@ sub init()
     ' We use this in onItemSelected so tiles in that row jump straight
     ' into playback instead of opening DetailsView first.
     m.continueRowIdx = -1
-    m.sideMenu.observeField("command", "onSideMenuCommand")
 
     ' MainScene.focusActiveChild() calls setFocus(true) on the HomeView
     ' Group root whenever the user comes back from the top nav (e.g.
@@ -38,17 +36,6 @@ sub onSelfFocusChanged()
     ' calls setFocus directly anyway.
     if m.rows = invalid or m.rows.content = invalid then return
     m.rows.setFocus(true)
-end sub
-
-' Forward navigation actions to MainScene; restore focus on collapse.
-sub onSideMenuCommand()
-    cmd = m.sideMenu.command
-    if cmd = invalid then return
-    if cmd.action = "collapsed" then
-        m.rows.setFocus(true)
-        return
-    end if
-    m.top.requestNav = cmd
 end sub
 
 sub onResult()
@@ -191,22 +178,16 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     end if
     ' Star button (`*` on the Roku remote, "options" event) toggles the
     ' favorite state of the focused poster. Star indicators on every
-    ' duplicate cell update via U_BumpAllCellsByUrl.
-    if key = "options" and m.rows.hasFocus() then
+    ' duplicate cell update via U_BumpAllCellsByUrl. We use
+    ' isInFocusChain (not hasFocus) because RowList sometimes routes
+    ' focus through an internal child node, leaving hasFocus() false
+    ' even though the rowlist visibly owns focus.
+    if key = "options" and m.rows.isInFocusChain() then
         if toggleFavoriteAtFocus() then return true
     end if
-    ' LEFT at the leftmost column of the row hands focus to the side
-    ' drawer's collapsed strip. RowList absorbs left between columns
-    ' and only bubbles when there's nowhere left to go.
-    if key = "left" and m.rows.hasFocus() then
-        sel = m.rows.rowItemFocused
-        col = 0
-        if sel <> invalid and sel.Count() >= 2 then col = sel[1]
-        if col = 0 then
-            m.sideMenu.callFunc("focusStrip", invalid)
-            return true
-        end if
-    end if
+    ' LEFT-to-sidebar from RowList is gone: RowList eats LEFT at col 0
+    ' silently and never bubbles. The sidebar trigger lives globally
+    ' on MainScene (LEFT on the leftmost nav button).
     return false
 end function
 

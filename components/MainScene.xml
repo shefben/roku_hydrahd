@@ -36,5 +36,13 @@
             <Rectangle width="400" height="6" color="0xff2424ff" />
             <Label id="loadingText" text="Loading..." font="font:MediumBoldSystemFont" color="0xffffffff" />
         </LayoutGroup>
+
+        <!-- Global side drawer. Lives at MainScene-level so it's reachable
+             from any view via LEFT on the leftmost nav button (navHome).
+             RowList absorbs LEFT at column 0 silently, so a per-view
+             handoff inside HomeView/ListView never fires - hence the
+             move out of those views. Drawn last so the expanded panel
+             overlays content. -->
+        <SideMenu id="sideMenu" />
     </children>
 </component>

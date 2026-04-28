@@ -11,11 +11,9 @@ sub init()
     m.grid = m.top.findNode("grid")
     m.header = m.top.findNode("header")
     m.empty = m.top.findNode("empty")
-    m.sideMenu = m.top.findNode("sideMenu")
     m.grid.itemComponentName = "PosterItem"
     m.grid.observeField("itemSelected", "onItemSelected")
     m.grid.observeField("itemFocused", "onItemFocused")
-    m.sideMenu.observeField("command", "onSideMenuCommand")
     m.grid.setFocus(true)
     ' Bounce self-focus down to the grid whenever MainScene refocuses
     ' the view root (e.g. after the user comes back from the top nav).
@@ -30,16 +28,6 @@ sub onSelfFocusChanged()
     if m.grid = invalid or m.grid.content = invalid then return
     if m.grid.content.getChildCount() = 0 then return
     m.grid.setFocus(true)
-end sub
-
-sub onSideMenuCommand()
-    cmd = m.sideMenu.command
-    if cmd = invalid then return
-    if cmd.action = "collapsed" then
-        m.grid.setFocus(true)
-        return
-    end if
-    m.top.requestNav = cmd
 end sub
 
 sub onArgs()
@@ -135,24 +123,16 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             return false
         end if
     end if
-    ' Star button toggles favorite for the focused poster.
-    if key = "options" and m.grid.hasFocus() then
+    ' Star button toggles favorite for the focused poster. isInFocusChain
+    ' is used (not hasFocus) so we still match when the grid has routed
+    ' focus through an internal node.
+    if key = "options" and m.grid.isInFocusChain() then
         if toggleFavoriteAtFocus() then return true
     end if
-    ' LEFT at the leftmost column hands focus to the side drawer's
-    ' collapsed strip. MarkupGrid only bubbles left when the focused
-    ' cell is already at column 0.
-    if key = "left" and m.grid.hasFocus() then
-        idx = m.grid.itemFocused
-        if idx = invalid then idx = 0
-        cols = m.grid.numColumns
-        if cols < 1 then cols = 1
-        col = idx mod cols
-        if col = 0 then
-            m.sideMenu.callFunc("focusStrip", invalid)
-            return true
-        end if
-    end if
+    ' LEFT-to-sidebar handoff has moved to MainScene (LEFT on the
+    ' leftmost nav button). MarkupGrid does bubble LEFT at col 0, so
+    ' we could trigger here too, but keeping the trigger in one place
+    ' avoids two SideMenu instances and ambiguous focus restoration.
     return false
 end function
 

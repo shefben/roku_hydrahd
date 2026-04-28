@@ -37,11 +37,16 @@
 
                 <Group translation="[40, 0]">
                     <Label id="resultTitle" translation="[0, 80]" text="" font="font:MediumBoldSystemFont" color="0xffffffff" visible="false" />
+                    <!-- 3 rows here (not 4) because the SearchView grid
+                         sits below MainScene chrome + LayoutGroup
+                         translation, leaving only ~790px of vertical
+                         room - 4 rows of 210 + 3 of 18 spacing = 894
+                         would overflow the screen. -->
                     <MarkupGrid id="grid" translation="[0, 110]"
-                                itemSize="[230, 380]"
-                                numColumns="3"
-                                numRows="2"
-                                itemSpacing="[16, 24]"
+                                itemSize="[120, 210]"
+                                numColumns="6"
+                                numRows="3"
+                                itemSpacing="[10, 18]"
                                 vertFocusAnimationStyle="floatingFocus"
                                 drawFocusFeedback="true"
                                 drawFocusFeedbackOnTop="true" />

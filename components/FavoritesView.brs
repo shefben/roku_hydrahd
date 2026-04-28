@@ -93,8 +93,9 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     ' Star toggles favorite. On this view that *removes* the title from
     ' the list, so after the toggle we rebuild the grid and try to keep
     ' focus on the surviving cell at the same index (or the previous
-    ' one if we just unstarred the last cell).
-    if key = "options" and m.grid.hasFocus() then
+    ' one if we just unstarred the last cell). isInFocusChain handles
+    ' grids that route focus through internal nodes.
+    if key = "options" and m.grid.isInFocusChain() then
         idx = m.grid.itemFocused
         if idx = invalid or idx < 0 or m.grid.content = invalid then return false
         cell = m.grid.content.getChild(idx)

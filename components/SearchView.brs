@@ -171,15 +171,13 @@ sub onResult()
     ' refresh the chip row so it's there next time they come back.
     W_PushSearchQuery(m.lastQuery)
     renderChips()
-    ' Auto-focus the result grid only if we're sure the user is done
-    ' typing - either they pressed Search/chip explicitly (m.autoFocusOnResult
-    ' set by those handlers) or the on-screen text matches the query
-    ' that just returned (i.e. they paused, debounce fired, results
-    ' arrived for what's actually on screen). Otherwise we leave focus
-    ' on the keyboard so the next keystroke isn't sent to a poster.
-    typedText = U_Trim(m.kb.text)
-    userPaused = (typedText = m.lastQuery)
-    if m.autoFocusOnResult or userPaused then
+    ' Only auto-focus the grid when the user has *explicitly* committed
+    ' to a search (Search button or chip). Debounced background results
+    ' arriving while the user is still typing must NEVER yank focus -
+    ' that was the bug where pressing one key suddenly sent the next
+    ' keypress to a poster. The user moves to the grid via DOWN-from-kb
+    ' (handled in onKeyEvent) when they're ready.
+    if m.autoFocusOnResult then
         m.autoFocusOnResult = false
         m.grid.jumpToItem = 0
         m.grid.setFocus(true)
@@ -343,6 +341,16 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         return false
     end if
     if key = "down" and m.kb.hasFocus() then
+        ' When results already exist, DOWN-from-kb goes *straight* to
+        ' the grid so the user has a 1-press path back. The keyboard
+        ' absorbs RIGHT internally (wraps to next-row letter) so we
+        ' can't rely on RIGHT for that. The Search button is only
+        ' useful before any results land - after that it's redundant.
+        if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
+            m.grid.setFocus(true)
+            showResults()
+            return true
+        end if
         m.searchBtn.setFocus(true)
         return true
     end if
@@ -370,8 +378,9 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             return true
         end if
     end if
-    ' Star toggles favorite for the focused result poster.
-    if key = "options" and m.grid.hasFocus() then
+    ' Star toggles favorite for the focused result poster. isInFocusChain
+    ' covers grids that route focus through internal nodes.
+    if key = "options" and m.grid.isInFocusChain() then
         idx = m.grid.itemFocused
         if idx <> invalid and idx >= 0 and m.grid.content <> invalid then
             cell = m.grid.content.getChild(idx)
@@ -384,7 +393,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     ' consumes left while moving between columns and only releases it at
     ' the leftmost edge), so this is the trigger to slide back to the
     ' keyboard.
-    if key = "left" and m.grid.hasFocus() then
+    if key = "left" and m.grid.isInFocusChain() then
         m.kb.setFocus(true)
         showKeyboard()
         return true

@@ -7,6 +7,7 @@ sub init()
     m.loadingBg = m.top.findNode("loadingBg")
     m.loadingGroup = m.top.findNode("loadingGroup")
     m.loadingText = m.top.findNode("loadingText")
+    m.sideMenu = m.top.findNode("sideMenu")
     m.contentDefaultY = 110
 
     m.navTabs = [
@@ -25,6 +26,12 @@ sub init()
         m.navButtons.Push(btn)
         btn.observeField("buttonSelected", "onNavSelected")
     end for
+
+    ' Sidebar lives on MainScene so it's reachable globally; observe its
+    ' command field and dispatch.
+    if m.sideMenu <> invalid then
+        m.sideMenu.observeField("command", "onSideMenuCommand")
+    end if
 
     m.activeNavIndex = 0
     m.viewStack = []
@@ -76,9 +83,11 @@ end sub
 sub setChromeForView(viewName as String)
     ' PlayerView wants the entire screen - hide the nav bar, hint, and
     ' move the contentHost up to (0, 0) so the Video node fills 1920x1080.
+    ' Also hide the global sidebar strip on the player.
     isPlayer = (viewName = "PlayerView")
     m.topBar.visible = not isPlayer
     m.hint.visible = not isPlayer
+    if m.sideMenu <> invalid then m.sideMenu.visible = not isPlayer
     if isPlayer then
         m.contentHost.translation = [0, 0]
     else
@@ -161,6 +170,33 @@ sub switchToTab(tabId as String)
     end for
 end sub
 
+' SideMenu sits at MainScene-level. Its `command` field carries the
+' button the user picked: { action: "navTab", tabId: ... } /
+' { action: "exit" } / { action: "collapsed" }. We dispatch directly
+' rather than going through the requestNav path used by views.
+sub onSideMenuCommand()
+    if m.sideMenu = invalid then return
+    cmd = m.sideMenu.command
+    if cmd = invalid then return
+    if cmd.action = "collapsed" then
+        ' User dismissed the strip without picking anything - put focus
+        ' back on the active view's main widget so arrows aren't dead.
+        focusActiveChild()
+        return
+    end if
+    if cmd.action = "exit" then
+        m.top.exitRequested = true
+        return
+    end if
+    if cmd.action = "navTab" then
+        ' Slide the panel back out before switching tabs - otherwise it
+        ' stays visible overlapping the new view's content.
+        m.sideMenu.callFunc("collapseSilent", invalid)
+        switchToTab(cmd.tabId)
+        return
+    end if
+end sub
+
 function navHasFocus() as Boolean
     for i = 0 to m.navButtons.Count() - 1
         if m.navButtons[i].hasFocus() then
@@ -192,6 +228,16 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             if m.activeNavIndex > 0 then
                 m.activeNavIndex = m.activeNavIndex - 1
                 m.navButtons[m.activeNavIndex].setFocus(true)
+                return true
+            end if
+            ' Already at the leftmost nav button - LEFT here opens the
+            ' side drawer. This is the *guaranteed* sidebar trigger
+            ' because nav buttons (plain Buttons) bubble directional
+            ' keys reliably; LEFT-from-RowList-col-0 does NOT bubble on
+            ' Roku, which is why a per-view handoff failed.
+            if m.sideMenu <> invalid and m.sideMenu.visible then
+                m.sideMenu.callFunc("focusStrip", invalid)
+                return true
             end if
             return true
         end if

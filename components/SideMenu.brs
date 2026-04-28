@@ -141,9 +141,9 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
                 expand()
                 return true
             end if
-            if key = "right" then
-                ' RIGHT cancels the highlight and hands focus back
-                ' to the parent's grid so the user is never stuck
+            if key = "right" or key = "back" then
+                ' RIGHT/BACK cancels the highlight and hands focus back
+                ' to the parent's content so the user is never stuck
                 ' on the strip without an obvious escape.
                 m.top.command = { action: "collapsed" }
                 return true
