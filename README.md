@@ -119,6 +119,7 @@ components/                    SceneGraph components
     DetailsTask.{xml,brs}       Background detail scrape
     ServersTask.{xml,brs}       Background mirror list scrape
     ResolveTask.{xml,brs}       Resolve embed URL -> direct stream
+    DiscoverTask.{xml,brs}      LAN-discovery probe for the resolver
 images/                         Channel art (add your own - see below)
 resolver/
   server.py                     Python sidecar: turns embeds into HLS/MP4
@@ -159,7 +160,14 @@ square. There is no other build step.
 1. Enable Developer Mode on the Roku (`Home Home Home Up Up Right Left
    Right Left Right`) and note its IP address and the password you set.
 
-2. Build `HydraHD.zip`. Either run the helper (Windows):
+2. Build `HydraHD.zip`. The channel auto-discovers the resolver on the
+   LAN, so you can just zip up `manifest`, `source/`, `components/`,
+   and `images/` at the **root** of the zip (don't zip the parent
+   directory). Skip `resolver/` and `tools/` - the Roku doesn't need
+   them.
+
+   The Windows helper is still available if you want to bake a
+   fallback IP into the build (useful if your LAN blocks broadcast):
 
    ```
    tools\build_zip.bat                    auto-detect LAN IP, port 8787
@@ -171,11 +179,6 @@ square. There is no other build step.
    `' build:resolver-url` line in `source/Utils.brs` with
    `http://<your-LAN-IP>:<port>`, and writes `HydraHD.zip` to the
    project root. The working tree is never modified.
-
-   Or zip manually: put `manifest`, `source/`, `components/`, and
-   `images/` at the **root** of the zip (don't zip the parent
-   directory). Skip `resolver/` and `tools/` - the Roku doesn't need
-   them.
 
 3. Visit `http://<roku-ip>` in a browser, log in with `rokudev` and
    your dev password, and upload the zip via the Development
@@ -220,12 +223,25 @@ Useful flags:
 - `--state-dir ./state` - where the persistent cookie cache lives
   (default: `<resolver>/state/`).
 - `--no-cookie-cache` - disable cross-restart cookie persistence.
+- `--discovery-port 1901` - UDP port the resolver listens on for Roku
+  discovery probes (default 1901).
+- `--no-discovery` - disable the LAN auto-discovery responder.
+  Channels then have to be configured manually.
 - `--verbose` - DEBUG logging.
 
-Then in the Roku channel: **Settings -> Set Resolver...** and enter
-`http://<machine-ip>:8787`. If you built the zip with `build_zip.bat`,
-that URL is already baked in - hitting **Clear** in Settings drops the
-override.
+### LAN auto-discovery
+
+You don't need to bake in or type an IP. On startup, the resolver
+opens UDP `:1901` and listens for the magic probe
+`HYDRAHD-DISCOVER\n`. The Roku channel broadcasts that probe whenever
+no resolver URL is stored in the registry, picks the first reply, and
+saves the URL it gets back. This means **the same channel zip works
+on any LAN** - just sideload it and run `server.py`.
+
+If the probe fails (router blocks broadcast, AP isolation, multiple
+VLANs), the channel falls back to a parallel scan of `:8787` across
+your /24. If both fail, open **Settings -> Auto-discover** to retry,
+or **Set Manually...** to enter the URL by hand.
 
 The resolver currently handles vidsrc (.xyz/.cc/.in/.pm/.io/.net/
 .ru), cloudnestra rcpvip/prorcp, vidsrc.cc /api/source chain, vidrock /

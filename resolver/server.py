@@ -13,8 +13,10 @@ small Python service takes an embed URL and returns:
       "subtitles": [ { "url": "...", "language": "en", "name": "English" } ] }
 
 Run:  python3 server.py --port 8787
-Then in the Roku channel Settings > Stream Resolver URL, set
-http://<this-machine-ip>:8787
+The Roku channel auto-discovers this resolver on the LAN via a UDP
+broadcast probe (``HYDRAHD-DISCOVER`` on UDP 1901), so the same
+channel zip works on any network with no IP baked in. If broadcast
+is blocked you can still set the URL manually in Settings.
 
 Implemented providers (working as of 2026-04):
   * vidsrc.xyz / .in / .pm / .io / .net / vsembed.ru — full chain through
@@ -72,6 +74,7 @@ import logging
 import os
 import pickle
 import re
+import socket
 import sys
 import tempfile
 import threading
@@ -1939,6 +1942,76 @@ _SKIP_RESP_HEADERS = {
 }
 
 
+DISCOVERY_PORT = 1901
+DISCOVERY_PROBE = b"HYDRAHD-DISCOVER"
+
+
+def _detect_lan_ip(peer_ip: str) -> str:
+    """Return the local interface IP that would route to peer_ip.
+
+    Used when answering a discovery probe so the URL we hand back is
+    reachable from the device that asked, even on hosts with multiple
+    NICs (Wi-Fi + Ethernet, VPN tun, Hyper-V vSwitch, etc.).
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect((peer_ip or "8.8.8.8", 1))
+        return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+def _start_discovery_responder(http_port: int, disc_port: int = DISCOVERY_PORT) -> threading.Thread | None:
+    """Spawn a UDP listener that answers Roku discovery probes.
+
+    The Roku channel broadcasts ``HYDRAHD-DISCOVER\\n`` to UDP
+    255.255.255.255:<disc_port>; we reply unicast with our reachable
+    ``http://<lan-ip>:<http-port>`` so the channel can stash it in the
+    registry without the user editing IP addresses by hand.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    except OSError:
+        pass
+    try:
+        sock.bind(("0.0.0.0", disc_port))
+    except OSError as exc:
+        LOG.warning("discovery: could not bind UDP %d (%s) - SSDP discovery disabled", disc_port, exc)
+        sock.close()
+        return None
+
+    def loop() -> None:
+        while True:
+            try:
+                data, addr = sock.recvfrom(1500)
+            except OSError:
+                return
+            if not data:
+                continue
+            line = data.split(b"\n", 1)[0].strip()
+            if line != DISCOVERY_PROBE:
+                continue
+            local_ip = _detect_lan_ip(addr[0])
+            reply = (
+                "HYDRAHD-RESOLVER\n"
+                f"url=http://{local_ip}:{http_port}\n"
+                "version=1\n"
+            ).encode("ascii", errors="replace")
+            try:
+                sock.sendto(reply, addr)
+            except OSError:
+                continue
+            LOG.info("discovery: replied to %s with http://%s:%d", addr[0], local_ip, http_port)
+
+    t = threading.Thread(target=loop, daemon=True, name="hydra-discover")
+    t.start()
+    return t
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "HydraHDResolver/1.0"
 
@@ -2249,6 +2322,17 @@ def main() -> int:
         action="store_true",
         help="Disable persisting per-client cookie jars across restarts.",
     )
+    parser.add_argument(
+        "--discovery-port",
+        type=int,
+        default=DISCOVERY_PORT,
+        help=f"UDP port to listen on for Roku discovery probes (default {DISCOVERY_PORT}).",
+    )
+    parser.add_argument(
+        "--no-discovery",
+        action="store_true",
+        help="Disable the LAN auto-discovery responder. Channels must then be configured manually.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -2260,6 +2344,10 @@ def main() -> int:
         cookie_path = os.path.join(args.state_dir, "cookies.pickle")
         _start_cookie_persistence(cookie_path)
         LOG.info("cookie cache: %s (flush every %ds)", cookie_path, CACHE_FLUSH_S)
+
+    if not args.no_discovery:
+        if _start_discovery_responder(args.port, args.discovery_port) is not None:
+            LOG.info("discovery: listening on UDP %d (Roku probes)", args.discovery_port)
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     LOG.info("listening on http://%s:%d", args.host, args.port)

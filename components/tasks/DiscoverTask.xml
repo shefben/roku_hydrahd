@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="DiscoverTask" extends="Task">
+    <interface>
+        <!-- Total time the SSDP probe will wait for a reply, ms. -->
+        <field id="probeMs" type="integer" value="1500" />
+        <!-- Total time the subnet scan fallback will wait, ms. -->
+        <field id="scanMs" type="integer" value="2500" />
+        <!-- Skip subnet scan when SSDP fails (faster failure). -->
+        <field id="ssdpOnly" type="bool" value="false" />
+        <!-- Default port the resolver listens on. Used by the subnet
+             scan fallback; SSDP replies carry the real port. -->
+        <field id="defaultPort" type="integer" value="8787" />
+        <!-- Result. "" means discovery failed.
+             alwaysNotify so callers always get the event even if
+             a previous run set the same value. -->
+        <field id="resolverUrl" type="string" alwaysNotify="true" />
+        <!-- One of: "ssdp", "scan", "none" -->
+        <field id="method" type="string" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/tasks/DiscoverTask.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+</component>

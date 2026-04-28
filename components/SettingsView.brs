@@ -17,8 +17,10 @@ sub init()
     m.baseRow.observeField("buttonSelected", "onBaseRowSelected")
 
     m.resolverRow = m.top.findNode("resolverRow")
-    m.resolverRow.buttons = ["Set Resolver...", "Clear"]
+    m.resolverRow.buttons = ["Auto-discover", "Set Manually...", "Clear"]
     m.resolverRow.observeField("buttonSelected", "onResolverRowSelected")
+    m.resolverStatus = m.top.findNode("resolverStatus")
+    m.resolverStatus.text = ""
 
     m.ccSizeRow = m.top.findNode("ccSizeRow")
     m.ccSizeRow.buttons = ["Text: Small", "Text: Medium", "Text: Large"]
@@ -65,10 +67,47 @@ end sub
 sub onResolverRowSelected()
     idx = m.resolverRow.buttonSelected
     if idx = 0 then
-        openUrlEditor("resolverUrl", "Edit resolver URL (e.g. http://192.168.1.50:8787)", U_PrefDefault("resolverUrl", U_DefaultResolverUrl()))
+        startDiscovery()
     else if idx = 1 then
+        openUrlEditor("resolverUrl", "Edit resolver URL (e.g. http://192.168.1.50:8787)", U_PrefDefault("resolverUrl", U_DefaultResolverUrl()))
+    else if idx = 2 then
         U_PrefSet("resolverUrl", "")
         refresh()
+        m.resolverStatus.text = ""
+    end if
+end sub
+
+sub startDiscovery()
+    if m.discoverTask <> invalid then return
+    task = CreateObject("roSGNode", "DiscoverTask")
+    if task = invalid then
+        m.resolverStatus.text = "Discovery unavailable on this device."
+        m.resolverStatus.color = "0xff8a8aff"
+        return
+    end if
+    m.discoverTask = task
+    task.observeField("resolverUrl", "onDiscoverDone")
+    m.resolverStatus.text = "Searching the LAN for a resolver..."
+    m.resolverStatus.color = "0xc8c8c8ff"
+    task.control = "RUN"
+end sub
+
+sub onDiscoverDone(event as Object)
+    found = event.getData()
+    method = ""
+    if m.discoverTask <> invalid then method = m.discoverTask.method
+    m.discoverTask = invalid
+    if found <> invalid and found <> "" then
+        U_PrefSet("resolverUrl", found)
+        label = "Found resolver at " + found
+        if method = "ssdp" then label = label + " (broadcast)"
+        if method = "scan" then label = label + " (scan)"
+        m.resolverStatus.text = label
+        m.resolverStatus.color = "0x9affa0ff"
+        refresh()
+    else
+        m.resolverStatus.text = "No resolver found. Use 'Set Manually...' to enter the URL."
+        m.resolverStatus.color = "0xff8a8aff"
     end if
 end sub
 

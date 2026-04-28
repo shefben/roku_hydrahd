@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="SideMenu" extends="Group">
+    <interface>
+        <!-- Output: parent observes this to react to button presses.
+             Payloads are { action: "navTab", tabId: "navHome" },
+             { action: "exit" }, or { action: "collapsed" }. -->
+        <field id="command" type="assocarray" alwaysNotify="true" />
+
+        <!-- Parent calls focusStrip to put focus on the collapsed
+             trigger (or the open menu if already expanded). -->
+        <function name="focusStrip" />
+        <function name="isExpanded" />
+        <function name="collapseSilent" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/SideMenu.brs" />
+
+    <children>
+        <!-- Always-visible thin strip at the leftmost edge. Acts as a
+             visual hint that the menu is here even when collapsed. -->
+        <Rectangle id="strip" width="6" height="1080" color="0xff2424ff" opacity="0.3" />
+        <Label id="stripChevron" translation="[8, 510]" width="20" height="40" text=">"
+               font="font:LargeBoldSystemFont" color="0xffffffff"
+               horizAlign="left" vertAlign="center" opacity="0.4" />
+
+        <!-- Off-screen Button that absorbs focus and OK on the strip
+             without leaking the default Button chrome onto the visible
+             strip Rectangle. The strip's brightness is updated based
+             on whether this button currently holds focus. -->
+        <Button id="stripToggle" translation="[-200, 0]" minWidth="6" text="" />
+
+        <!-- The slide-out panel itself. Sits at x=-280 collapsed and
+             animates to x=0 when expanded. -->
+        <Group id="panel" translation="[-280, 0]">
+            <Rectangle width="280" height="1080" color="0x0a0a0af0" />
+            <Rectangle translation="[278, 0]" width="2" height="1080" color="0xff2424ff" opacity="0.7" />
+            <ButtonGroup id="menuBg" translation="[20, 80]" layoutDirection="vert"
+                         itemSpacings="[14]" minWidth="240" />
+        </Group>
+
+        <Animation id="expandAnim" duration="0.22" easeFunction="outQuad" repeat="false">
+            <Vector2DFieldInterpolator id="expandInterp"
+                key="[0, 1]"
+                keyValue="[[-280, 0], [0, 0]]"
+                fieldToInterp="panel.translation" />
+        </Animation>
+    </children>
+</component>

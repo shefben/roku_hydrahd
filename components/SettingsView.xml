@@ -22,10 +22,11 @@
             <Group>
                 <Label text="Stream Resolver URL (optional)" font="font:MediumBoldSystemFont" color="0xffffffff" />
                 <Label id="resolverHelp" translation="[0, 30]" width="1700" wrap="true" maxLines="3"
-                       text="HydraHD uses third-party iframe embeds. Roku can only play direct video URLs (HLS / MP4). To enable real playback for those mirrors, run the Python resolver in resolver/ on a machine on your network and put its URL here, e.g. http://192.168.1.50:8787"
+                       text="HydraHD uses third-party iframe embeds. Roku can only play direct video URLs (HLS / MP4). Run the Python resolver in resolver/ on any machine on your LAN; the channel auto-discovers it on startup. If discovery fails (VLAN, AP isolation, etc.) use 'Auto-discover' here or 'Set Manually...' to enter the URL directly."
                        font="font:SmallSystemFont" color="0x9a9a9aff" />
                 <Label id="resolverValue" translation="[0, 110]" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" />
                 <ButtonGroup id="resolverRow" translation="[0, 140]" layoutDirection="horiz" itemSpacings="[12]" minWidth="220" />
+                <Label id="resolverStatus" translation="[0, 195]" text="" font="font:SmallSystemFont" color="0x9affa0ff" />
             </Group>
 
             <Group>

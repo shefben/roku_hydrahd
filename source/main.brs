@@ -34,13 +34,14 @@ end sub
 
 ' Write per-channel defaults the first time the channel runs. Users can
 ' override anything here later via the Settings screen.
+'
+' We do NOT pre-fill a resolverUrl - MainScene runs DiscoverTask on
+' startup whenever the registry slot is missing or empty, so the
+' channel ships with no LAN IP baked in.
 sub seedDefaults()
     reg = CreateObject("roRegistrySection", "HydraHD")
     if not reg.Exists("baseUrl") then
         reg.Write("baseUrl", "https://hydrahd.ru")
-    end if
-    if not reg.Exists("resolverUrl") then
-        reg.Write("resolverUrl", "http://192.168.3.180:8787")
     end if
     reg.Flush()
 end sub

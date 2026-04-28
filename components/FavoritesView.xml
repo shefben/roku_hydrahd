@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="FavoritesView" extends="Group">
+    <interface>
+        <field id="args" type="assocarray" onChange="onArgs" />
+        <field id="requestNav" type="assocarray" alwaysNotify="true" />
+        <field id="loading" type="bool" alwaysNotify="true" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/FavoritesView.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
+
+    <children>
+        <Label id="header" translation="[60, 10]" text="My List" font="font:LargeBoldSystemFont" color="0xffffffff" />
+        <MarkupGrid id="grid"
+                    translation="[60, 70]"
+                    itemSize="[230, 380]"
+                    numColumns="7"
+                    numRows="2"
+                    itemSpacing="[16, 24]"
+                    vertFocusAnimationStyle="floatingFocus"
+                    drawFocusFeedback="true"
+                    drawFocusFeedbackOnTop="true" />
+        <Label id="empty" translation="[60, 400]" width="1800" height="200" wrap="true"
+               text="Your list is empty. Open a movie or show and press 'Save to List' to add it." font="font:MediumSystemFont"
+               color="0x808080ff" visible="false" />
+    </children>
+</component>

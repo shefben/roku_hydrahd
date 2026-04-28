@@ -34,6 +34,29 @@ sub init()
     ' Park focus on the nav so the user always has a foothold even if
     ' the home view is still loading or failed to fetch.
     m.navButtons[0].setFocus(true)
+
+    ' Auto-discover the resolver on the LAN so the user never has to
+    ' type an IP. Runs in the background; if it succeeds before the
+    ' user picks a mirror to play, ResolveTask will pick the new URL
+    ' straight out of the registry.
+    if U_PrefDefault("resolverUrl", "") = "" then startResolverDiscovery()
+end sub
+
+sub startResolverDiscovery()
+    if m.discoverTask <> invalid then return
+    task = CreateObject("roSGNode", "DiscoverTask")
+    if task = invalid then return
+    task.observeField("resolverUrl", "onResolverDiscovered")
+    m.discoverTask = task
+    task.control = "RUN"
+end sub
+
+sub onResolverDiscovered(event as Object)
+    found = event.getData()
+    if found <> invalid and found <> "" then
+        U_PrefSet("resolverUrl", found)
+    end if
+    m.discoverTask = invalid
 end sub
 
 sub pushView(viewName as String, args as Dynamic)
