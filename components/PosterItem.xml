@@ -3,8 +3,8 @@
     <interface>
         <field id="itemContent" type="node" onChange="onContent" />
         <field id="focusPercent" type="float" onChange="onFocus" />
-        <field id="width" type="float" value="110" />
-        <field id="height" type="float" value="200" />
+        <field id="width" type="float" value="220" />
+        <field id="height" type="float" value="370" />
     </interface>
     <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
     <script type="text/brightscript">
@@ -71,8 +71,8 @@
             if pct > 0 and pct < 100 then
                 m.progressTrack.visible = true
                 m.progressBar.visible = true
-                w = Int((pct * 110) / 100)
-                if w < 3 then w = 3
+                w = Int((pct * 220) / 100)
+                if w < 4 then w = 4
                 m.progressBar.width = w
             else
                 m.progressTrack.visible = false
@@ -121,20 +121,20 @@
         ]]>
     </script>
     <children>
-        <Rectangle id="frame" width="116" height="171" translation="[-3,-3]" color="0x00000000" />
-        <Poster id="poster" width="110" height="165" translation="[0,0]" loadDisplayMode="scaleToZoom"
+        <Rectangle id="frame" width="232" height="358" translation="[-6,-6]" color="0x00000000" />
+        <Poster id="poster" width="220" height="330" translation="[0,0]" loadDisplayMode="scaleToZoom"
                 failedBitmapUri="pkg:/images/placeholder.png" loadingBitmapUri="pkg:/images/placeholder.png" />
-        <Label id="badge" translation="[4, 4]" text="" font="font:SmallestBoldSystemFont" color="0xffffffff" />
-        <Rectangle id="favStarBg" translation="[88, 2]" width="20" height="20" color="0x000000c0" visible="false" />
-        <Label id="favStar" translation="[88, 1]" width="20" height="20" text="★"
-               font="font:SmallBoldSystemFont" color="0xffd24aff"
+        <Label id="badge" translation="[8, 8]" text="" font="font:SmallestBoldSystemFont" color="0xffffffff" />
+        <Rectangle id="favStarBg" translation="[184, 4]" width="32" height="32" color="0x000000c0" visible="false" />
+        <Label id="favStar" translation="[184, 2]" width="32" height="32" text="★"
+               font="font:LargeBoldSystemFont" color="0xffd24aff"
                horizAlign="center" vertAlign="center" visible="false" />
-        <Label id="rating" translation="[4, 145]" text="" font="font:SmallestBoldSystemFont" color="0xffd24aff" />
-        <Rectangle id="progressTrack" translation="[0, 163]" width="110" height="3" color="0x000000aa" visible="false" />
-        <Rectangle id="progressBar" translation="[0, 163]" width="0" height="3" color="0xff2424ff" visible="false" />
-        <Label id="title" translation="[0, 168]" width="110" height="16" maxLines="1" text=""
-               font="font:SmallestBoldSystemFont" color="0xc8c8c8ff" horizAlign="left" />
-        <Label id="year" translation="[0, 184]" width="110" height="14" text=""
+        <Label id="rating" translation="[8, 300]" text="" font="font:SmallestBoldSystemFont" color="0xffd24aff" />
+        <Rectangle id="progressTrack" translation="[0, 326]" width="220" height="4" color="0x000000aa" visible="false" />
+        <Rectangle id="progressBar" translation="[0, 326]" width="0" height="4" color="0xff2424ff" visible="false" />
+        <Label id="title" translation="[0, 336]" width="220" height="22" maxLines="1" text=""
+               font="font:SmallBoldSystemFont" color="0xc8c8c8ff" horizAlign="left" />
+        <Label id="year" translation="[0, 358]" width="220" height="18" text=""
                font="font:SmallestSystemFont" color="0x808080ff" horizAlign="left" />
     </children>
 </component>

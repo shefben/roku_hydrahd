@@ -28,7 +28,7 @@
         <Group id="contentHost" translation="[0, 110]" />
 
         <Label id="hint" translation="[60, 1030]"
-               text="OK to select  -  BACK to go back  -  UP from content for menu  -  OPTIONS for Settings"
+               text="OK to select  -  BACK for menu  -  UP for top bar  -  * to favorite"
                font="font:SmallestSystemFont" color="0x808080ff" />
 
         <Rectangle id="loadingBg" visible="false" color="0x000000aa" width="1920" height="1080" />

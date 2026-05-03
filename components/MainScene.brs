@@ -42,11 +42,9 @@ sub init()
     ' the home view is still loading or failed to fetch.
     m.navButtons[0].setFocus(true)
 
-    ' Auto-discover the resolver on the LAN so the user never has to
-    ' type an IP. Runs in the background; if it succeeds before the
-    ' user picks a mirror to play, ResolveTask will pick the new URL
-    ' straight out of the registry.
-    if U_PrefDefault("resolverUrl", "") = "" then startResolverDiscovery()
+    ' Auto-discovery temporarily disabled - it was freezing the channel
+    ' on title selection. ResolveTask falls back to U_DefaultResolverUrl()
+    ' (hardcoded LAN IP) when the registry slot is empty.
 end sub
 
 sub startResolverDiscovery()
@@ -140,6 +138,16 @@ sub onChildNavRequest(event as Object)
     payload = event.getData()
     if payload = invalid then return
     action = payload.action
+    ' DetailsTask competes with DiscoverTask's subnet scan for Roku's
+    ' tight per-channel TCP socket pool (~10-15). If discover is still
+    ' running when the user clicks a poster, the page fetch can stall
+    ' or look frozen. Cancel discover before opening any subview - the
+    ' SSDP probe path finishes in <1.5s anyway, and a missed scan just
+    ' means the user falls back to a manual Settings entry or a retry.
+    if m.discoverTask <> invalid then
+        m.discoverTask.control = "STOP"
+        m.discoverTask = invalid
+    end if
     if action = "open" then
         pushView(payload.view, payload.args)
         focusActiveChild()
@@ -219,6 +227,14 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             popView()
             return true
         end if
+        ' On a root view (Home, Movies, etc.) BACK has no view to pop,
+        ' so it doubles as the menu trigger. This is the most
+        ' discoverable shortcut - LEFT-on-navHome works too but the
+        ' user has to UP to nav first; BACK works from anywhere.
+        if m.sideMenu <> invalid and m.sideMenu.visible then
+            m.sideMenu.callFunc("openMenu", invalid)
+            return true
+        end if
         return false
     end if
 
@@ -231,12 +247,11 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
                 return true
             end if
             ' Already at the leftmost nav button - LEFT here opens the
-            ' side drawer. This is the *guaranteed* sidebar trigger
-            ' because nav buttons (plain Buttons) bubble directional
-            ' keys reliably; LEFT-from-RowList-col-0 does NOT bubble on
-            ' Roku, which is why a per-view handoff failed.
+            ' side drawer (panel expanded directly, not just the strip).
+            ' Nav buttons bubble directional keys reliably; LEFT-from-
+            ' RowList-col-0 does NOT bubble on Roku.
             if m.sideMenu <> invalid and m.sideMenu.visible then
-                m.sideMenu.callFunc("focusStrip", invalid)
+                m.sideMenu.callFunc("openMenu", invalid)
                 return true
             end if
             return true

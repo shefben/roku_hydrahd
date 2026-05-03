@@ -68,6 +68,20 @@ function focusStrip() as Object
     return invalid
 end function
 
+' Directly expand the panel and put focus on the first button. Used
+' as the user-facing trigger - lighting up a 6px strip is too subtle.
+function openMenu() as Object
+    if not m.expanded then
+        m.expanded = true
+        m.expandInterp.keyValue = [[-280, 0], [0, 0]]
+        m.expandAnim.control = "stop"
+        m.expandAnim.control = "start"
+    end if
+    m.menuBg.jumpToItem = 0
+    m.menuBg.setFocus(true)
+    return invalid
+end function
+
 function isExpanded() as Object
     return m.expanded
 end function

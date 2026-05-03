@@ -102,7 +102,7 @@ end function
 ' Keep the trailing comment marker - the build script searches for it
 ' to inject the user's LAN IP without disturbing anything else.
 function U_DefaultResolverUrl() as String
-    return ""  ' build:resolver-url
+    return "http://192.168.3.180:8787"  ' build:resolver-url
 end function
 
 ' Stable per-(device, channel) opaque ID. The resolver uses this to

@@ -11,23 +11,22 @@
     <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
 
     <children>
-        <!-- 4 rows visible at once. Cells are ~half the linear size of
-             the original (poster 110x165 + ~35px text below = 200 tall),
-             which is roughly 1/4 the screen area each. itemSize.y is
-             cell + label-row gap. floatingFocus keeps labels glued to
-             rows so they don't appear at "random" y positions. -->
+        <!-- 2 rows visible. itemSize.y = poster 380 + label headroom 80
+             (LargeBoldSystemFont is ~50px tall; 80 leaves a small gutter
+             below for visual breathing room). floatingFocus keeps labels
+             glued to their rows as the user scrolls. -->
         <RowList id="rows"
                  translation="[60, 20]"
-                 itemSize="[1800, 230]"
-                 numRows="4"
-                 rowItemSize="[[110, 200]]"
-                 rowItemSpacing="[[10, 0]]"
-                 rowSpacings="[10]"
+                 itemSize="[1800, 460]"
+                 numRows="2"
+                 rowItemSize="[[220, 380]]"
+                 rowItemSpacing="[[20, 0]]"
+                 rowSpacings="[20]"
                  rowFocusAnimationStyle="floatingFocus"
                  showRowLabel="[true]"
                  showRowCounter="[false]"
                  rowLabelOffset="[[0, 0]]"
-                 rowLabelFont="font:SmallBoldSystemFont"
+                 rowLabelFont="font:LargeBoldSystemFont"
                  rowLabelColor="0xffffffff"
                  focusXOffset="0" />
 

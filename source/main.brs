@@ -35,9 +35,9 @@ end sub
 ' Write per-channel defaults the first time the channel runs. Users can
 ' override anything here later via the Settings screen.
 '
-' We do NOT pre-fill a resolverUrl - MainScene runs DiscoverTask on
-' startup whenever the registry slot is missing or empty, so the
-' channel ships with no LAN IP baked in.
+' Auto-discovery is currently disabled (it was freezing the channel on
+' title selection). The LAN resolver URL is baked in via
+' U_DefaultResolverUrl() and used whenever the registry slot is empty.
 sub seedDefaults()
     reg = CreateObject("roRegistrySection", "HydraHD")
     if not reg.Exists("baseUrl") then

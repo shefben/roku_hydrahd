@@ -13,11 +13,11 @@
     <children>
         <Label id="header" translation="[60, 10]" text="My List" font="font:LargeBoldSystemFont" color="0xffffffff" />
         <MarkupGrid id="grid"
-                    translation="[60, 60]"
-                    itemSize="[120, 210]"
-                    numColumns="14"
-                    numRows="4"
-                    itemSpacing="[10, 18]"
+                    translation="[60, 70]"
+                    itemSize="[230, 380]"
+                    numColumns="7"
+                    numRows="2"
+                    itemSpacing="[16, 24]"
                     vertFocusAnimationStyle="floatingFocus"
                     drawFocusFeedback="true"
                     drawFocusFeedbackOnTop="true" />

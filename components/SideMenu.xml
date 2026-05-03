@@ -9,6 +9,11 @@
         <!-- Parent calls focusStrip to put focus on the collapsed
              trigger (or the open menu if already expanded). -->
         <function name="focusStrip" />
+        <!-- openMenu expands the panel and focuses the first button
+             directly. This is what the user-facing trigger keys
+             (LEFT-on-navHome, BACK-on-root) call so the menu is
+             obvious - just lighting up a 6px strip is too subtle. -->
+        <function name="openMenu" />
         <function name="isExpanded" />
         <function name="collapseSilent" />
     </interface>

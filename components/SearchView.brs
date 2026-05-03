@@ -34,6 +34,16 @@ sub init()
     m.timer.repeat = false
     m.timer.observeField("fire", "onDebounce")
 
+    ' Idle timer: when the user stops typing for 1.5s and results
+    ' exist, auto-focus the grid. This is the reliable kb->grid
+    ' transition - relying on the Roku Keyboard widget to bubble DOWN
+    ' or RIGHT at its edges is unreliable across firmware. The timer
+    ' fires only after typing pauses, so it never yanks focus mid-type.
+    m.idleTimer = createObject("roSGNode", "Timer")
+    m.idleTimer.duration = 1.5
+    m.idleTimer.repeat = false
+    m.idleTimer.observeField("fire", "onIdleFire")
+
     m.maxChips = 6
     m.chipNodes = []
     for i = 0 to m.maxChips - 1
@@ -94,6 +104,9 @@ end sub
 
 sub onTextChange()
     txt = m.kb.text
+    ' Reset the idle timer on every keypress so it only fires after
+    ' the user actually pauses.
+    m.idleTimer.control = "stop"
     if txt = invalid or Len(txt) < 2 then
         m.empty.visible = false
         m.grid.content = invalid
@@ -101,6 +114,22 @@ sub onTextChange()
     end if
     m.timer.control = "stop"
     m.timer.control = "start"
+    m.idleTimer.control = "start"
+end sub
+
+sub onIdleFire()
+    ' User stopped typing for 1.5s. If results have arrived and they
+    ' are still on the keyboard, hand them off to the grid. This is
+    ' the *only* reliable way to escape the Roku Keyboard widget,
+    ' which absorbs RIGHT internally and may not bubble DOWN on every
+    ' firmware. Skip if focus has already moved (chips, search btn,
+    ' grid) - we don't yank the user.
+    if not m.kb.hasFocus() then return
+    if m.grid.content = invalid then return
+    if m.grid.content.getChildCount() = 0 then return
+    m.grid.jumpToItem = 0
+    m.grid.setFocus(true)
+    showResults()
 end sub
 
 sub onDebounce()
