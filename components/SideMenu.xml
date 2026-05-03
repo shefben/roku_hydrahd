@@ -6,13 +6,18 @@
              { action: "exit" }, or { action: "collapsed" }. -->
         <field id="command" type="assocarray" alwaysNotify="true" />
 
+        <!-- Field-based expand trigger. Parent sets this to true and
+             SideMenu observes it to expand the panel + focus the
+             first button. Used in place of callFunc("openMenu") so
+             we never get burned by callFunc's parameter-arity rules. -->
+        <field id="expandRequest" type="bool" value="false" alwaysNotify="true" />
+
         <!-- Parent calls focusStrip to put focus on the collapsed
              trigger (or the open menu if already expanded). -->
         <function name="focusStrip" />
         <!-- openMenu expands the panel and focuses the first button
-             directly. This is what the user-facing trigger keys
-             (LEFT-on-navHome, BACK-on-root) call so the menu is
-             obvious - just lighting up a 6px strip is too subtle. -->
+             directly. Kept for callers that prefer callFunc; setting
+             expandRequest = true is the more robust path. -->
         <function name="openMenu" />
         <function name="isExpanded" />
         <function name="collapseSilent" />

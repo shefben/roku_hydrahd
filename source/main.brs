@@ -43,5 +43,8 @@ sub seedDefaults()
     if not reg.Exists("baseUrl") then
         reg.Write("baseUrl", "https://hydrahd.ru")
     end if
+    if not reg.Exists("resolverUrl") then
+        reg.Write("resolverUrl", "http://192.168.3.180:8787")
+    end if
     reg.Flush()
 end sub

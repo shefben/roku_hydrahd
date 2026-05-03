@@ -29,7 +29,16 @@ sub doWork()
         return
     end if
 
-    resolver = U_PrefDefault("resolverUrl", U_DefaultResolverUrl())
+    ' Prefer the build-time hardcoded URL over any registry-cached one.
+    ' When auto-discovery was on, it cached whatever it found at runtime
+    ' (potentially the wrong host on a multi-homed LAN); after disabling
+    ' it, that stale value would still win via U_PrefDefault and make
+    ' ResolveTask hang on an unreachable IP, which the UI shows as a
+    ' freeze. Falling back to the registry only when no build-time URL
+    ' is baked in keeps the manual-Settings override path working for
+    ' channels built without an IP.
+    resolver = U_DefaultResolverUrl()
+    if resolver = "" then resolver = U_PrefDefault("resolverUrl", "")
     if resolver <> "" then
         out = resolveViaService(resolver, embedUrl)
         if out <> invalid and out.url <> "" then

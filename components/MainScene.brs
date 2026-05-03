@@ -65,11 +65,28 @@ sub onResolverDiscovered(event as Object)
 end sub
 
 sub pushView(viewName as String, args as Dynamic)
+    ' Clear any carry-over loading overlay from the previous view. When
+    ' the user clicks a poster while HomeView is still mid-fetch (or any
+    ' other transition where the outgoing view never got to set
+    ' loading=false because it was destroyed first), the overlay would
+    ' otherwise stay visible on top of the new view - hiding the new
+    ' view's contents (e.g. DetailsView's Play/Mirror buttons) until
+    ' the new view's own task completes and fires loading=false.
+    setLoading(false)
+
     while m.contentHost.getChildCount() > 0
         m.contentHost.removeChildIndex(0)
     end while
 
     child = m.contentHost.createChild(viewName)
+    ' Set args BEFORE registering the loading observer. DetailsView's
+    ' onArgs fires fetchDetails which sets loading=true; we *want*
+    ' MainScene to miss that first true so the partial DetailsView
+    ' (title + poster + Play/Mirror buttons from args) is visible
+    ' immediately while DetailsTask fills in the description in the
+    ' background. The eventual loading=false from onDetailResult is
+    ' a no-op against an already-hidden overlay, so the chrome stays
+    ' in sync.
     if args <> invalid then child.args = args
     child.observeField("requestNav", "onChildNavRequest")
     child.observeField("loading", "onChildLoading")
@@ -231,8 +248,11 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         ' so it doubles as the menu trigger. This is the most
         ' discoverable shortcut - LEFT-on-navHome works too but the
         ' user has to UP to nav first; BACK works from anywhere.
+        ' Use the field-based trigger (expandRequest) instead of
+        ' callFunc("openMenu") - callFunc has bitten us before with
+        ' silent failures around parameter arity.
         if m.sideMenu <> invalid and m.sideMenu.visible then
-            m.sideMenu.callFunc("openMenu", invalid)
+            m.sideMenu.expandRequest = true
             return true
         end if
         return false
@@ -251,7 +271,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             ' Nav buttons bubble directional keys reliably; LEFT-from-
             ' RowList-col-0 does NOT bubble on Roku.
             if m.sideMenu <> invalid and m.sideMenu.visible then
-                m.sideMenu.callFunc("openMenu", invalid)
+                m.sideMenu.expandRequest = true
                 return true
             end if
             return true

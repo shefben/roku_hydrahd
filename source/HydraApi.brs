@@ -24,11 +24,21 @@ function HA_Get(url as String, refer as String) as String
     xfer.AddHeader("Accept-Language", "en-US,en;q=0.9")
     if refer <> invalid and refer <> "" then xfer.AddHeader("Referer", refer)
     xfer.EnableEncodings(true)
+    ' Bail out if the response stalls for 12s straight. Stops a wedged
+    ' DNS / unreachable host from holding a task thread (and the visible
+    ' loading spinner) for the full 60s OS-level TCP timeout.
+    xfer.SetMinimumTransferRate(1, 12)
     body = xfer.GetToString()
     if body = invalid then return ""
     return body
 end function
 
+' HA_GetJson is used by ResolveTask to call the LAN resolver. Synchronous
+' GetToString has no timeout and would hang the task thread for 30-60s
+' when the resolver host is unreachable - that's perceived as a freeze
+' because MirrorPicker sits on its "Resolving stream from ..." spinner
+' the whole time. Async + 8s deadline gives us a fast, clean failure
+' that MirrorPicker can surface as "Could not resolve a direct stream".
 function HA_GetJson(url as String) as Object
     xfer = CreateObject("roUrlTransfer")
     xfer.SetCertificatesFile("common:/certs/ca-bundle.crt")
@@ -37,8 +47,31 @@ function HA_GetJson(url as String) as Object
     xfer.AddHeader("User-Agent", HA_UA())
     xfer.AddHeader("Accept", "application/json,text/plain,*/*")
     xfer.EnableEncodings(true)
-    body = xfer.GetToString()
-    if body = invalid or body = "" then return invalid
+
+    msgPort = CreateObject("roMessagePort")
+    xfer.SetMessagePort(msgPort)
+    if not xfer.AsyncGetToString() then return invalid
+
+    deadlineMs = 8000
+    timer = CreateObject("roTimespan")
+    timer.mark()
+    body = invalid
+    while timer.totalMilliseconds() < deadlineMs
+        remaining = deadlineMs - timer.totalMilliseconds()
+        if remaining < 1 then exit while
+        msg = wait(remaining, msgPort)
+        if msg = invalid then exit while
+        if type(msg) = "roUrlEvent" then
+            if msg.getResponseCode() = 200 then body = msg.getString()
+            exit while
+        end if
+    end while
+
+    if body = invalid then
+        xfer.AsyncCancel()
+        return invalid
+    end if
+    if body = "" then return invalid
     return ParseJson(body)
 end function
 

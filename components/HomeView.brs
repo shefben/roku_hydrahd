@@ -45,7 +45,10 @@ sub onResult()
         m.empty.text = "Failed to load - press OK to retry, or * to search."
         m.empty.visible = true
         m.empty.focusable = true
-        m.empty.setFocus(true)
+        ' Only steal focus to the retry label if the user is still
+        ' inside HomeView. If they've navigated up to the nav bar or
+        ' opened the side menu while we were loading, leave them alone.
+        if m.top.isInFocusChain() then m.empty.setFocus(true)
         return
     end if
     rows = bundle.rows
@@ -122,8 +125,13 @@ sub onResult()
     if rootContent.getChildCount() > 0 then
         m.rows.jumpToRowItem = [0, 0]
     end if
-    ' Re-grab focus now that there's actually something to focus on.
-    m.rows.setFocus(true)
+    ' Re-grab focus now that there's actually something to focus on -
+    ' but only if the user is still inside HomeView. If they UPed to
+    ' the nav bar or opened the side menu while we were loading, an
+    ' unconditional setFocus would yank them back into the rowlist
+    ' and trap them there (RowList eats LEFT at col 0, so they can't
+    ' get to the side menu anymore).
+    if m.top.isInFocusChain() then m.rows.setFocus(true)
 end sub
 
 ' OK on the empty state retries the load.

@@ -35,6 +35,7 @@ sub init()
     ]
     m.menuBg.observeField("buttonSelected", "onButton")
     m.top.observeField("focusedChild", "onFocusedChild")
+    m.top.observeField("expandRequest", "onExpandRequest")
 
     m.tabMap = {
         search:    "navSearch"
@@ -58,8 +59,14 @@ sub updateStripVisual(focused as Boolean)
 end sub
 
 ' --- Public API (callFunc-able) -----------------------------------------
+'
+' Roku's callFunc REQUIRES the called function to accept exactly one
+' parameter, even when the caller passes invalid. A 0-arity function
+' fails silently (callFunc returns invalid, function never runs) -
+' that's the bug that made LEFT-on-navHome look like a dead key.
+' Each public function here takes a `_unused as Dynamic` placeholder.
 
-function focusStrip() as Object
+function focusStrip(_unused as Dynamic) as Object
     if m.expanded then
         m.menuBg.setFocus(true)
         return invalid
@@ -70,25 +77,18 @@ end function
 
 ' Directly expand the panel and put focus on the first button. Used
 ' as the user-facing trigger - lighting up a 6px strip is too subtle.
-function openMenu() as Object
-    if not m.expanded then
-        m.expanded = true
-        m.expandInterp.keyValue = [[-280, 0], [0, 0]]
-        m.expandAnim.control = "stop"
-        m.expandAnim.control = "start"
-    end if
-    m.menuBg.jumpToItem = 0
-    m.menuBg.setFocus(true)
+function openMenu(_unused as Dynamic) as Object
+    expand()
     return invalid
 end function
 
-function isExpanded() as Object
+function isExpanded(_unused as Dynamic) as Object
     return m.expanded
 end function
 
 ' Snap the panel back to collapsed without notifying the parent. Used
 ' if the parent view is being torn down or wants to reset state.
-function collapseSilent() as Object
+function collapseSilent(_unused as Dynamic) as Object
     if not m.expanded then return invalid
     m.expanded = false
     m.expandInterp.keyValue = [[0, 0], [-280, 0]]
@@ -96,6 +96,16 @@ function collapseSilent() as Object
     m.expandAnim.control = "start"
     return invalid
 end function
+
+' Field-based trigger as a belt-and-suspenders backup for callFunc.
+' MainScene sets `expandRequest = true` and we expand from here. This
+' path doesn't depend on callFunc's parameter-arity rules at all.
+sub onExpandRequest()
+    if m.top.expandRequest then
+        expand()
+        m.top.expandRequest = false
+    end if
+end sub
 
 ' --- Internal -----------------------------------------------------------
 
