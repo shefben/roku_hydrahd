@@ -102,7 +102,7 @@ end function
 ' Keep the trailing comment marker - the build script searches for it
 ' to inject the user's LAN IP without disturbing anything else.
 function U_DefaultResolverUrl() as String
-    return "http://192.168.3.180:8787"  ' build:resolver-url
+    return ""  ' build:resolver-url
 end function
 
 ' Stable per-(device, channel) opaque ID. The resolver uses this to
@@ -169,6 +169,38 @@ sub U_BumpCellFavorite(cell as Object)
     cell.favBump = cur + 1
 end sub
 
+' Custom "kind" field on cells. ContentNode.contentType is a fixed
+' enum that silently rejects "movie" / "tv" assignments and leaves an
+' integer default in their place - reading it back later and comparing
+' to a string throws a Type Mismatch and aborts the handler (most
+' obviously: HomeView.onItemSelected on a poster click). We round-trip
+' the kind via a custom string field instead.
+sub U_SetCellKind(cell as Object, kindStr as String)
+    if cell = invalid then return
+    if not cell.hasField("kind") then cell.addField("kind", "string", false)
+    cell.kind = kindStr
+end sub
+
+function U_GetCellKind(cell as Object) as String
+    if cell = invalid then return ""
+    if not cell.hasField("kind") then return ""
+    k = cell.kind
+    if k = invalid then return ""
+    if Type(k) = "String" or Type(k) = "roString" then return k
+    return ""
+end function
+
+' Custom progress percent field. ContentNode has no built-in
+' ``percentageWatched`` field, so direct assignments generate a
+' "Tried to set nonexistent field" warning and the value never
+' actually lands - which is why progress bars never showed. PosterItem
+' now reads ``pctWatched`` instead.
+sub U_SetCellPct(cell as Object, pct as Integer)
+    if cell = invalid then return
+    if not cell.hasField("pctWatched") then cell.addField("pctWatched", "integer", false)
+    cell.pctWatched = pct
+end sub
+
 sub U_BumpAllCellsByUrl(content as Object, url as String)
     if content = invalid or url = invalid or url = "" then return
     n = content.getChildCount()
@@ -204,8 +236,7 @@ function U_ToggleFavoriteForCell(cell as Object, content as Object) as Boolean
     if cell.HDPosterUrl <> invalid then poster = cell.HDPosterUrl
     tmdb = ""
     if cell.id <> invalid then tmdb = cell.id
-    kind = ""
-    if cell.contentType <> invalid then kind = cell.contentType
+    kind = U_GetCellKind(cell)
     if W_IsFavorite("", href) then
         W_RemoveFavorite("", href)
     else

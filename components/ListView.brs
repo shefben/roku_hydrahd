@@ -99,9 +99,9 @@ sub appendItems(items as Object)
         cell.shortDescriptionLine2 = item.year
         cell.releaseDate = item.quality
         cell.id = item.id
-        cell.contentType = item.kind
+        U_SetCellKind(cell, item.kind)
         cell.url = item.href
-        cell.percentageWatched = W_GetProgressPct("", item.href, 0, 0)
+        U_SetCellPct(cell, W_GetProgressPct("", item.href, 0, 0))
         m.items.Push(item)
     end for
 end sub

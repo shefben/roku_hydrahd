@@ -53,20 +53,15 @@
             else
                 m.badge.visible = false
             end if
-            ' Resume bar - upstream views set percentageWatched (0..100)
-            ' on cells where the user has progress to show. Anything <=0
-            ' or >=100 hides the bar so finished/unstarted titles look
-            ' like a normal poster.
+            ' Resume bar - upstream views set pctWatched (0..100) via
+            ' U_SetCellPct on cells where the user has progress to show.
+            ' Anything <=0 or >=100 hides the bar so finished/unstarted
+            ' titles look like a normal poster. Custom field instead of
+            ' Roku's built-in `percentageWatched` (which doesn't exist
+            ' on plain ContentNode and silently rejects writes).
             pct = 0
-            if c.percentageWatched <> invalid then
-                pv = c.percentageWatched
-                if Type(pv) = "Float" or Type(pv) = "roFloat" or Type(pv) = "Double" or Type(pv) = "roDouble" then
-                    pct = Int(pv)
-                else if Type(pv) = "String" or Type(pv) = "roString" then
-                    pct = pv.ToInt()
-                else
-                    pct = pv
-                end if
+            if c.hasField("pctWatched") and c.pctWatched <> invalid then
+                pct = c.pctWatched
             end if
             if pct > 0 and pct < 100 then
                 m.progressTrack.visible = true

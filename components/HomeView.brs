@@ -77,9 +77,9 @@ sub onResult()
             end if
             cell.releaseDate = "Resume"
             cell.id = ip.itemKey
-            cell.contentType = ip.kind
+            U_SetCellKind(cell, ip.kind)
             cell.url = ip.href
-            cell.percentageWatched = ip.pct
+            U_SetCellPct(cell, ip.pct)
         end for
     end if
 
@@ -96,11 +96,11 @@ sub onResult()
                 cell.HDPosterUrl = fv.poster
                 cell.SDPosterUrl = fv.poster
             end if
-            if fv.kind <> invalid then cell.contentType = fv.kind
+            if fv.kind <> invalid then U_SetCellKind(cell, fv.kind)
             if fv.href <> invalid then cell.url = fv.href
             if fv.itemKey <> invalid then cell.id = fv.itemKey
             ' Show resume bar on My List tiles too if they have progress.
-            cell.percentageWatched = W_GetProgressPct(fv.imdb, fv.href, 0, 0)
+            U_SetCellPct(cell, W_GetProgressPct(fv.imdb, fv.href, 0, 0))
         end for
     end if
 
@@ -116,9 +116,9 @@ sub onResult()
             cell.shortDescriptionLine2 = item.year
             cell.releaseDate = item.quality
             cell.id = item.id
-            cell.contentType = item.kind
+            U_SetCellKind(cell, item.kind)
             cell.url = item.href
-            cell.percentageWatched = W_GetProgressPct("", item.href, 0, 0)
+            U_SetCellPct(cell, W_GetProgressPct("", item.href, 0, 0))
         end for
     end for
     m.rows.content = rootContent
@@ -156,8 +156,15 @@ sub onItemSelected()
     href = ""
     if item.url <> invalid then href = item.url
     kind = "movie"
-    if item.contentType <> invalid and (item.contentType = "tv" or item.contentType = "movie") then
-        kind = item.contentType
+    ' Read kind from our custom field (U_SetCellKind round-trips through
+    ' addField "kind"). ContentNode.contentType silently rejects "tv" /
+    ' "movie" assignments and stores an integer default in their place;
+    ' comparing that int to a string with `=` throws a Type Mismatch
+    ' and aborts the whole click handler - which made it look like the
+    ' channel froze on every poster click.
+    ckind = U_GetCellKind(item)
+    if ckind = "tv" or ckind = "movie" then
+        kind = ckind
     else if href <> "" and Instr(1, href, "/watchseries/") > 0 then
         kind = "tv"
     end if

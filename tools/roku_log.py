@@ -26,7 +26,7 @@ import socket
 import sys
 import time
 
-DEFAULT_HOST = "192.168.3.2"
+DEFAULT_HOST = "192.168.3.7"
 DEFAULT_PORT = 8085
 DEFAULT_LOG = "roku_debug.log"
 RECONNECT_MIN = 1.0

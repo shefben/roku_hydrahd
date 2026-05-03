@@ -47,10 +47,10 @@ sub refresh()
             cell.HDPosterUrl = fv.poster
             cell.SDPosterUrl = fv.poster
         end if
-        if fv.kind <> invalid then cell.contentType = fv.kind
+        if fv.kind <> invalid then U_SetCellKind(cell, fv.kind)
         if fv.href <> invalid then cell.url = fv.href
         if fv.itemKey <> invalid then cell.id = fv.itemKey
-        cell.percentageWatched = W_GetProgressPct("", fv.href, 0, 0)
+        U_SetCellPct(cell, W_GetProgressPct("", fv.href, 0, 0))
     end for
     m.grid.content = root
     m.grid.jumpToItem = 0
