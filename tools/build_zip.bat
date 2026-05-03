@@ -42,11 +42,11 @@ if /I "%LAN_IP%"=="auto" (
 if "%LAN_IP%"=="" (
     set "RESOLVER_URL="
     echo [build_zip] Channel dir : %CHANNEL_DIR%
-    echo [build_zip] Resolver URL: ^<none^> (channel will auto-discover on LAN^)
+    echo [build_zip] Resolver URL: ^<none^> ^(channel will auto-discover on LAN^)
 ) else (
     set "RESOLVER_URL=http://%LAN_IP%:%LAN_PORT%"
     echo [build_zip] Channel dir : %CHANNEL_DIR%
-    echo [build_zip] Resolver URL: %RESOLVER_URL% (fallback if discovery fails^)
+    echo [build_zip] Resolver URL: %RESOLVER_URL% ^(fallback if discovery fails^)
 )
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0build_zip.ps1"

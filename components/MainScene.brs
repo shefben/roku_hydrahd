@@ -42,9 +42,11 @@ sub init()
     ' the home view is still loading or failed to fetch.
     m.navButtons[0].setFocus(true)
 
-    ' Auto-discovery temporarily disabled - it was freezing the channel
-    ' on title selection. ResolveTask falls back to U_DefaultResolverUrl()
-    ' (hardcoded LAN IP) when the registry slot is empty.
+    ' Auto-discover the resolver on the LAN so the user never has to
+    ' type an IP. Runs in the background; if it succeeds before the
+    ' user picks a mirror to play, ResolveTask will pick the new URL
+    ' straight out of the registry.
+    if U_PrefDefault("resolverUrl", "") = "" then startResolverDiscovery()
 end sub
 
 sub startResolverDiscovery()
