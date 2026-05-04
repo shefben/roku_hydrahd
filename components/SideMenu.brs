@@ -117,8 +117,11 @@ sub expand()
     m.expandAnim.control = "start"
     ' Land focus on the first button (the close arrow) so the user
     ' instantly knows where they are and can press DOWN to navigate.
-    m.menuBg.jumpToItem = 0
+    ' ButtonGroup uses focusButton (write-only field that moves the
+    ' focus marker), not the list-style jumpToItem - and setFocus has
+    ' to come first or some firmwares reset the marker.
     m.menuBg.setFocus(true)
+    m.menuBg.focusButton = 0
 end sub
 
 sub collapse()

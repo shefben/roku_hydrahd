@@ -1,48 +1,39 @@
-' SearchView.brs - On-screen keyboard + grid of results, with a row of
-' recent-query chips above the keyboard.
+' SearchView.brs - Custom on-screen keyboard + grid of results, with a row
+' of recent-query chips above the keyboard.
+'
+' Why a custom keyboard: the built-in Roku Keyboard widget absorbs
+' LEFT/RIGHT internally - they wrap within the keyboard's own grid and
+' never bubble to the parent's onKeyEvent. That made it impossible to
+' escape the keyboard with RIGHT and forced unreliable timer-based
+' fallbacks. Building the keyboard out of horizontal ButtonGroups gives
+' us every keypress at every row's edge: ButtonGroup releases LEFT/RIGHT
+' when there's nothing more to navigate to in its layout direction, so
+' the parent reliably sees them and can route to the results grid.
 
 sub init()
     m.items = []
     m.lastQuery = ""
-    m.resultsMode = false
-    ' Set true by onSearchClick / onChipPressed before runQuery, then
-    ' consumed in onResult. Tells onResult whether the user committed
-    ' to a search (we should jump to the grid) vs. typed and paused
-    ' (we keep focus on the keyboard unless the on-screen query exactly
-    ' matches the query that just returned).
-    m.autoFocusOnResult = false
+    m.query = ""
 
-    m.kb = m.top.findNode("kb")
+    m.queryDisplay = m.top.findNode("queryDisplay")
     m.grid = m.top.findNode("grid")
     m.empty = m.top.findNode("empty")
-    m.searchBtn = m.top.findNode("searchBtn")
     m.resultTitle = m.top.findNode("resultTitle")
-    m.layoutWrap = m.top.findNode("layoutWrap")
-    m.slideAnim = m.top.findNode("slideAnim")
-    m.slideInterp = m.top.findNode("slideInterp")
     m.chipsLabel = m.top.findNode("chipsLabel")
     m.chipsRow = m.top.findNode("chipsRow")
     m.chipClear = m.top.findNode("chipClear")
+    m.kbHint = m.top.findNode("kbHint")
 
-    m.kb.text = ""
+    setupKeyboard()
+    refreshQueryDisplay()
+
     m.grid.itemComponentName = "PosterItem"
-    m.searchBtn.observeField("buttonSelected", "onSearchClick")
-    m.kb.observeField("text", "onTextChange")
     m.grid.observeField("itemSelected", "onItemSelected")
+
     m.timer = createObject("roSGNode", "Timer")
-    m.timer.duration = 0.6
+    m.timer.duration = 0.5
     m.timer.repeat = false
     m.timer.observeField("fire", "onDebounce")
-
-    ' Idle timer: when the user stops typing for 1.5s and results
-    ' exist, auto-focus the grid. This is the reliable kb->grid
-    ' transition - relying on the Roku Keyboard widget to bubble DOWN
-    ' or RIGHT at its edges is unreliable across firmware. The timer
-    ' fires only after typing pauses, so it never yanks focus mid-type.
-    m.idleTimer = createObject("roSGNode", "Timer")
-    m.idleTimer.duration = 1.5
-    m.idleTimer.repeat = false
-    m.idleTimer.observeField("fire", "onIdleFire")
 
     m.maxChips = 6
     m.chipNodes = []
@@ -65,96 +56,93 @@ sub init()
     m.focusTimer.control = "start"
     ' Same focus-redirect pattern as the other views: when MainScene
     ' re-focuses the SearchView root (e.g. after returning from the
-    ' top nav) we bounce focus down so arrows actually do something.
-    ' If results are visible we land on the grid; otherwise the
-    ' keyboard.
+    ' top nav) we bounce focus back to the keyboard - or to the grid if
+    ' results exist and the user was last interacting with them.
     m.top.observeField("focusedChild", "onSelfFocusChanged")
 end sub
 
-sub onSelfFocusChanged()
-    fc = m.top.focusedChild
-    if fc = invalid then return
-    if not fc.isSameNode(m.top) then return
-    if m.resultsMode and m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
-        m.grid.setFocus(true)
+' --- Custom keyboard setup -----------------------------------------------
+
+sub setupKeyboard()
+    m.kbLabels = [
+        ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"],
+        ["K", "L", "M", "N", "O", "P", "Q", "R", "S", "T"],
+        ["U", "V", "W", "X", "Y", "Z", "0", "1", "2", "3"],
+        ["4", "5", "6", "7", "8", "9"],
+        ["SPACE", "DEL", "CLR"]
+    ]
+    m.kbRows = []
+    for i = 0 to m.kbLabels.Count() - 1
+        row = m.top.findNode("kbRow" + i.ToStr())
+        if row <> invalid then
+            row.buttons = m.kbLabels[i]
+            row.observeField("buttonSelected", "onKbButton")
+            m.kbRows.Push(row)
+        end if
+    end for
+end sub
+
+sub onKbButton(event as Object)
+    sender = event.getRoSGNode()
+    if sender = invalid then return
+    rowIdx = -1
+    for i = 0 to m.kbRows.Count() - 1
+        if m.kbRows[i].isSameNode(sender) then
+            rowIdx = i
+            exit for
+        end if
+    end for
+    if rowIdx < 0 then return
+    btnIdx = sender.buttonSelected
+    if btnIdx = invalid or btnIdx < 0 then return
+    if btnIdx >= m.kbLabels[rowIdx].Count() then return
+    handleKey(m.kbLabels[rowIdx][btnIdx])
+end sub
+
+sub handleKey(label as String)
+    if label = "SPACE" then
+        m.query = m.query + " "
+    else if label = "DEL" then
+        if Len(m.query) > 0 then m.query = Left(m.query, Len(m.query) - 1)
+    else if label = "CLR" then
+        m.query = ""
     else
-        m.kb.setFocus(true)
+        m.query = m.query + LCase(label)
+    end if
+    refreshQueryDisplay()
+    onTextChange()
+end sub
+
+sub refreshQueryDisplay()
+    if m.query = "" then
+        m.queryDisplay.text = "Type to search..."
+        m.queryDisplay.color = "0x808080ff"
+    else
+        m.queryDisplay.text = m.query
+        m.queryDisplay.color = "0xffffffff"
     end if
 end sub
 
-sub grabKeyboardFocus()
-    m.kb.setFocus(true)
-end sub
-
-sub showResults()
-    if m.resultsMode then return
-    m.resultsMode = true
-    m.slideAnim.control = "stop"
-    m.slideInterp.keyValue = [[0, 0], [-450, 0]]
-    m.slideAnim.control = "start"
-end sub
-
-sub showKeyboard()
-    if not m.resultsMode then return
-    m.resultsMode = false
-    m.slideAnim.control = "stop"
-    m.slideInterp.keyValue = [[-450, 0], [0, 0]]
-    m.slideAnim.control = "start"
-end sub
+' --- Search execution ----------------------------------------------------
 
 sub onTextChange()
-    txt = m.kb.text
-    ' Reset the idle timer on every keypress so it only fires after
-    ' the user actually pauses.
-    m.idleTimer.control = "stop"
-    if txt = invalid or Len(txt) < 2 then
+    if Len(m.query) < 2 then
         m.empty.visible = false
         m.grid.content = invalid
+        m.resultTitle.visible = false
+        m.timer.control = "stop"
         return
     end if
     m.timer.control = "stop"
     m.timer.control = "start"
-    m.idleTimer.control = "start"
-end sub
-
-sub onIdleFire()
-    ' User stopped typing for 1.5s. If results have arrived and they
-    ' are still on the keyboard, hand them off to the grid. This is
-    ' the *only* reliable way to escape the Roku Keyboard widget,
-    ' which absorbs RIGHT internally and may not bubble DOWN on every
-    ' firmware. Skip if focus has already moved (chips, search btn,
-    ' grid) - we don't yank the user.
-    if not m.kb.hasFocus() then return
-    if m.grid.content = invalid then return
-    if m.grid.content.getChildCount() = 0 then return
-    m.grid.jumpToItem = 0
-    m.grid.setFocus(true)
-    showResults()
 end sub
 
 sub onDebounce()
-    ' Debounced (auto) search - keep focus on the keyboard unless the
-    ' user has fully paused typing.
     runQuery()
-end sub
-
-sub onSearchClick()
-    ' Explicit Search button press - the user expects to land on the
-    ' results, even if the query already ran on debounce. If runQuery
-    ' is a no-op (same query) the existing grid is still good; just
-    ' move focus there.
-    m.autoFocusOnResult = true
-    runQuery()
-    if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
-        m.autoFocusOnResult = false
-        m.grid.jumpToItem = 0
-        m.grid.setFocus(true)
-        showResults()
-    end if
 end sub
 
 sub runQuery()
-    q = U_Trim(m.kb.text)
+    q = U_Trim(m.query)
     if Len(q) < 2 then return
     if q = m.lastQuery then return
     m.lastQuery = q
@@ -174,7 +162,6 @@ sub onResult()
         m.empty.visible = true
         m.grid.content = invalid
         m.resultTitle.visible = false
-        m.autoFocusOnResult = false
         return
     end if
     m.empty.visible = false
@@ -200,18 +187,6 @@ sub onResult()
     ' refresh the chip row so it's there next time they come back.
     W_PushSearchQuery(m.lastQuery)
     renderChips()
-    ' Only auto-focus the grid when the user has *explicitly* committed
-    ' to a search (Search button or chip). Debounced background results
-    ' arriving while the user is still typing must NEVER yank focus -
-    ' that was the bug where pressing one key suddenly sent the next
-    ' keypress to a poster. The user moves to the grid via DOWN-from-kb
-    ' (handled in onKeyEvent) when they're ready.
-    if m.autoFocusOnResult then
-        m.autoFocusOnResult = false
-        m.grid.jumpToItem = 0
-        m.grid.setFocus(true)
-        showResults()
-    end if
 end sub
 
 sub onItemSelected()
@@ -260,15 +235,14 @@ sub onChipPressed(event as Object)
     if sender = invalid then return
     q = sender.text
     if q = invalid or q = "" then return
-    m.kb.text = q
+    m.query = q
+    refreshQueryDisplay()
     m.lastQuery = ""
-    m.autoFocusOnResult = true
     runQuery()
     if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
         m.grid.setFocus(true)
-        showResults()
     else
-        m.kb.setFocus(true)
+        focusFirstKeyboardRow()
     end if
 end sub
 
@@ -277,10 +251,10 @@ sub onChipsClear()
     renderChips()
     ' Drop focus back to keyboard since the chip the user was on just
     ' disappeared - never leave them stranded.
-    m.kb.setFocus(true)
+    focusFirstKeyboardRow()
 end sub
 
-' --- Focus / remote navigation -------------------------------------------
+' --- Focus helpers -------------------------------------------------------
 
 function chipsHaveFocus() as Boolean
     if m.chipClear.hasFocus() then return true
@@ -306,7 +280,6 @@ function focusFirstVisibleChip() as Boolean
 end function
 
 function chipNeighbor(delta as Integer) as Object
-    ' Build the in-order list of currently-focusable chip buttons.
     seq = []
     for each node in m.chipNodes
         if node.visible then seq.Push(node)
@@ -326,18 +299,61 @@ function chipNeighbor(delta as Integer) as Object
     return seq[target]
 end function
 
+function focusedKbRow() as Integer
+    for i = 0 to m.kbRows.Count() - 1
+        if m.kbRows[i].isInFocusChain() then return i
+    end for
+    return -1
+end function
+
+sub focusFirstKeyboardRow()
+    if m.kbRows.Count() > 0 then m.kbRows[0].setFocus(true)
+end sub
+
+sub focusKbRow(idx as Integer, preserveCol as Integer)
+    if idx < 0 or idx >= m.kbRows.Count() then return
+    row = m.kbRows[idx]
+    cnt = m.kbLabels[idx].Count()
+    target = preserveCol
+    if target < 0 then target = 0
+    if target >= cnt then target = cnt - 1
+    ' setFocus first - on some firmwares it reinitialises the focused
+    ' button index. Setting focusButton afterwards reliably lands the
+    ' marker where we want it.
+    row.setFocus(true)
+    row.focusButton = target
+end sub
+
+sub onSelfFocusChanged()
+    fc = m.top.focusedChild
+    if fc = invalid then return
+    if not fc.isSameNode(m.top) then return
+    if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 and m.grid.itemFocused >= 0 then
+        m.grid.setFocus(true)
+    else
+        focusFirstKeyboardRow()
+    end if
+end sub
+
+sub grabKeyboardFocus()
+    focusFirstKeyboardRow()
+end sub
+
+' --- Remote navigation ---------------------------------------------------
+
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
+
     ' Safety net: if focus somehow ends up on the root Group (e.g. focus
-    ' race during view push) any directional key should land on the
+    ' race during view push), any directional key should land on the
     ' keyboard so the user is never stranded with dead arrows.
-    if not m.kb.hasFocus() and not m.searchBtn.hasFocus() and not m.grid.hasFocus() and not chipsHaveFocus() then
+    if not m.grid.isInFocusChain() and not chipsHaveFocus() and focusedKbRow() < 0 then
         if key = "up" or key = "down" or key = "left" or key = "right" or key = "OK" then
-            m.kb.setFocus(true)
-            showKeyboard()
+            focusFirstKeyboardRow()
             return true
         end if
     end if
+
     if chipsHaveFocus() then
         if key = "left" then
             n = chipNeighbor(-1)
@@ -356,7 +372,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             return true
         end if
         if key = "down" then
-            m.kb.setFocus(true)
+            focusFirstKeyboardRow()
             return true
         end if
         if key = "up" then
@@ -364,49 +380,54 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             return false
         end if
     end if
-    if key = "up" and m.kb.hasFocus() then
-        if focusFirstVisibleChip() then return true
-        ' No chips - bubble so MainScene grabs nav.
+
+    rowIdx = focusedKbRow()
+    if rowIdx >= 0 then
+        col = m.kbRows[rowIdx].buttonFocused
+        if col = invalid then col = 0
+        if key = "down" then
+            if rowIdx < m.kbRows.Count() - 1 then
+                focusKbRow(rowIdx + 1, col)
+                return true
+            end if
+            ' From the last keyboard row, DOWN jumps to the results grid
+            ' as a secondary escape path.
+            if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
+                m.grid.setFocus(true)
+                return true
+            end if
+            return true
+        end if
+        if key = "up" then
+            if rowIdx > 0 then
+                focusKbRow(rowIdx - 1, col)
+                return true
+            end if
+            ' From the top row: hop to chips if visible, otherwise let
+            ' MainScene grab the nav bar.
+            if focusFirstVisibleChip() then return true
+            return false
+        end if
+        if key = "right" then
+            ' Horizontal ButtonGroup releases RIGHT only when there is no
+            ' next button in the row, i.e. the user is on the rightmost
+            ' key. Route them straight to the results grid every time.
+            if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
+                m.grid.setFocus(true)
+                return true
+            end if
+            ' No results yet - eat the key so it doesn't bubble into a
+            ' nav-bar move.
+            return true
+        end if
+        if key = "left" then
+            ' RIGHT-from-rightmost-key already handed off above. LEFT
+            ' from the leftmost key has nowhere to go - eat the key.
+            return true
+        end if
         return false
     end if
-    if key = "down" and m.kb.hasFocus() then
-        ' When results already exist, DOWN-from-kb goes *straight* to
-        ' the grid so the user has a 1-press path back. The keyboard
-        ' absorbs RIGHT internally (wraps to next-row letter) so we
-        ' can't rely on RIGHT for that. The Search button is only
-        ' useful before any results land - after that it's redundant.
-        if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
-            m.grid.setFocus(true)
-            showResults()
-            return true
-        end if
-        m.searchBtn.setFocus(true)
-        return true
-    end if
-    if key = "up" and m.searchBtn.hasFocus() then
-        ' Without this the user gets stuck on the Search button - up would
-        ' otherwise bubble out to MainScene and steal focus to the nav bar.
-        m.kb.setFocus(true)
-        return true
-    end if
-    ' DOWN from the Search button is the secondary path to the grid -
-    ' the keyboard wraps RIGHT internally so we give the user another
-    ' obvious way out (the auto-focus on result is the primary one).
-    if key = "down" and m.searchBtn.hasFocus() then
-        if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
-            m.grid.setFocus(true)
-            showResults()
-            return true
-        end if
-        return true
-    end if
-    if key = "right" and (m.kb.hasFocus() or m.searchBtn.hasFocus()) then
-        if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
-            m.grid.setFocus(true)
-            showResults()
-            return true
-        end if
-    end if
+
     ' Star toggles favorite for the focused result poster. isInFocusChain
     ' covers grids that route focus through internal nodes.
     if key = "options" and m.grid.isInFocusChain() then
@@ -423,8 +444,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     ' the leftmost edge), so this is the trigger to slide back to the
     ' keyboard.
     if key = "left" and m.grid.isInFocusChain() then
-        m.kb.setFocus(true)
-        showKeyboard()
+        focusFirstKeyboardRow()
         return true
     end if
     return false

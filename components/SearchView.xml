@@ -13,49 +13,61 @@
     <children>
         <Label id="title" translation="[60, 10]" text="Search" font="font:LargeBoldSystemFont" color="0xffffffff" />
 
-        <Group id="layoutWrap" translation="[0, 0]">
-            <LayoutGroup translation="[60, 70]" layoutDirection="horiz" itemSpacings="[40]">
-                <Group>
-                    <Label id="chipsLabel" translation="[0, 0]" text="Recent searches"
-                           font="font:SmallSystemFont" color="0x808080ff" visible="false" />
-                    <LayoutGroup id="chipsRow" translation="[0, 22]" layoutDirection="horiz"
-                                 itemSpacings="[8]" visible="false">
-                        <Button id="chip0" text="" minWidth="120" visible="false" />
-                        <Button id="chip1" text="" minWidth="120" visible="false" />
-                        <Button id="chip2" text="" minWidth="120" visible="false" />
-                        <Button id="chip3" text="" minWidth="120" visible="false" />
-                        <Button id="chip4" text="" minWidth="120" visible="false" />
-                        <Button id="chip5" text="" minWidth="120" visible="false" />
-                        <Button id="chipClear" text="Clear" minWidth="90" visible="false" />
-                    </LayoutGroup>
+        <LayoutGroup translation="[60, 70]" layoutDirection="horiz" itemSpacings="[40]">
+            <!-- LEFT COLUMN: recent chips, query display, custom keyboard.
+                 The Roku built-in Keyboard widget absorbs LEFT/RIGHT
+                 internally (it wraps within its own grid and never lets
+                 those keys bubble up), which made it impossible to escape
+                 the keyboard with RIGHT. We rebuild the keyboard out of
+                 horizontal ButtonGroups so the parent's onKeyEvent gets
+                 every directional press at every row's edge. -->
+            <Group>
+                <Label id="chipsLabel" translation="[0, 0]" text="Recent searches"
+                       font="font:SmallSystemFont" color="0x808080ff" visible="false" />
+                <LayoutGroup id="chipsRow" translation="[0, 22]" layoutDirection="horiz"
+                             itemSpacings="[8]" visible="false">
+                    <Button id="chip0" text="" minWidth="120" visible="false" />
+                    <Button id="chip1" text="" minWidth="120" visible="false" />
+                    <Button id="chip2" text="" minWidth="120" visible="false" />
+                    <Button id="chip3" text="" minWidth="120" visible="false" />
+                    <Button id="chip4" text="" minWidth="120" visible="false" />
+                    <Button id="chip5" text="" minWidth="120" visible="false" />
+                    <Button id="chipClear" text="Clear" minWidth="90" visible="false" />
+                </LayoutGroup>
 
-                    <Keyboard id="kb" translation="[0, 80]" />
-                    <Label id="kbHint" translation="[0, 400]" text="Press OK on Search after typing - press UP for recent searches"
-                           font="font:SmallSystemFont" color="0x808080ff" />
-                    <Button id="searchBtn" translation="[0, 440]" text="Search" minWidth="180" />
-                </Group>
+                <Label id="queryDisplay" translation="[0, 80]" text="Type to search..."
+                       font="font:LargeBoldSystemFont" color="0x808080ff" width="660" />
+                <Rectangle translation="[0, 124]" width="660" height="2" color="0xff2424ff" />
 
-                <Group translation="[40, 0]">
-                    <Label id="resultTitle" translation="[0, 80]" text="" font="font:MediumBoldSystemFont" color="0xffffffff" visible="false" />
-                    <MarkupGrid id="grid" translation="[0, 110]"
-                                itemSize="[230, 380]"
-                                numColumns="3"
-                                numRows="2"
-                                itemSpacing="[16, 24]"
-                                vertFocusAnimationStyle="floatingFocus"
-                                drawFocusFeedback="true"
-                                drawFocusFeedbackOnTop="true" />
-                    <Label id="empty" translation="[0, 160]" text="" font="font:MediumSystemFont"
-                           color="0x808080ff" visible="false" />
-                </Group>
-            </LayoutGroup>
-        </Group>
+                <ButtonGroup id="kbRow0" translation="[0, 150]" layoutDirection="horiz"
+                             itemSpacings="[6]" minWidth="60" />
+                <ButtonGroup id="kbRow1" translation="[0, 220]" layoutDirection="horiz"
+                             itemSpacings="[6]" minWidth="60" />
+                <ButtonGroup id="kbRow2" translation="[0, 290]" layoutDirection="horiz"
+                             itemSpacings="[6]" minWidth="60" />
+                <ButtonGroup id="kbRow3" translation="[0, 360]" layoutDirection="horiz"
+                             itemSpacings="[6]" minWidth="60" />
+                <ButtonGroup id="kbRow4" translation="[0, 430]" layoutDirection="horiz"
+                             itemSpacings="[6]" minWidth="120" />
 
-        <Animation id="slideAnim" duration="0.3" repeat="false" easeFunction="outQuad">
-            <Vector2DFieldInterpolator id="slideInterp"
-                key="[0.0, 1.0]"
-                keyValue="[[0,0], [-450,0]]"
-                fieldToInterp="layoutWrap.translation" />
-        </Animation>
+                <Label id="kbHint" translation="[0, 510]"
+                       text="RIGHT to view results  -  UP for recent searches"
+                       font="font:SmallSystemFont" color="0x808080ff" width="660" />
+            </Group>
+
+            <Group>
+                <Label id="resultTitle" translation="[0, 80]" text="" font="font:MediumBoldSystemFont" color="0xffffffff" visible="false" />
+                <MarkupGrid id="grid" translation="[0, 110]"
+                            itemSize="[230, 380]"
+                            numColumns="3"
+                            numRows="2"
+                            itemSpacing="[16, 24]"
+                            vertFocusAnimationStyle="floatingFocus"
+                            drawFocusFeedback="true"
+                            drawFocusFeedbackOnTop="true" />
+                <Label id="empty" translation="[0, 160]" text="" font="font:MediumSystemFont"
+                       color="0x808080ff" visible="false" />
+            </Group>
+        </LayoutGroup>
     </children>
 </component>

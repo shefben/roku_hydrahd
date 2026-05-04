@@ -22,7 +22,6 @@
             <Button id="navTrending" text="Trending" minWidth="160" />
             <Button id="navMyList" text="My List" minWidth="140" />
             <Button id="navSearch" text="Search" minWidth="140" />
-            <Button id="navSettings" text="Settings" minWidth="160" />
         </LayoutGroup>
 
         <Group id="contentHost" translation="[0, 110]" />

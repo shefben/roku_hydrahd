@@ -16,7 +16,12 @@ sub init()
         { id: "navTv",       view: "ListView",      args: { source: "tv",      title: "TV Shows" } },
         { id: "navTrending", view: "ListView",      args: { source: "popular", title: "Trending" } },
         { id: "navMyList",   view: "FavoritesView", args: invalid },
-        { id: "navSearch",   view: "SearchView",    args: invalid },
+        { id: "navSearch",   view: "SearchView",    args: invalid }
+    ]
+    ' Tabs reachable from the SideMenu only - no top-bar button. Settings
+    ' was pushed off the visible 1920px row, so we route it through the
+    ' drawer's "Options" entry instead.
+    m.offBarTabs = [
         { id: "navSettings", view: "SettingsView",  args: invalid }
     ]
 
@@ -191,6 +196,17 @@ sub switchToTab(tabId as String)
             m.activeNavIndex = i
             m.viewStack = []
             pushView(m.navTabs[i].view, m.navTabs[i].args)
+            focusActiveChild()
+            return
+        end if
+    end for
+    ' Off-bar tabs (currently just Settings) have no nav button to
+    ' highlight. Leave activeNavIndex pointing at the previous bar tab
+    ' so UP-into-nav still lands on a valid button.
+    for i = 0 to m.offBarTabs.Count() - 1
+        if m.offBarTabs[i].id = tabId then
+            m.viewStack = []
+            pushView(m.offBarTabs[i].view, m.offBarTabs[i].args)
             focusActiveChild()
             return
         end if
