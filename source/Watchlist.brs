@@ -468,7 +468,12 @@ function W_MirrorScore(host as String) as Float
     rec = W_MirrorRecord(host)
     total = rec.ok + rec.fail
     if total = 0 then return -1.0
-    return rec.ok / total!
+    ' `total!` was a misuse of BrightScript's type sigil: the suffix
+    ' declares a new (uninitialized) float variable instead of casting,
+    ' which crashed any host with a recorded outcome - the exact path
+    ' Continue Watching tiles always hit. Multiply by 1.0 to force a
+    ' float division without inventing a new identifier.
+    return rec.ok / (total * 1.0)
 end function
 
 function W_MirrorTotal(host as String) as Integer

@@ -142,7 +142,7 @@ function mirrorScoreLabel(host as String) as String
     rec = W_MirrorRecord(host)
     total = rec.ok + rec.fail
     if total = 0 then return ""
-    ratio = rec.ok / total!
+    ratio = rec.ok / (total * 1.0)
     pct = Int(ratio * 100)
     return pct.ToStr() + "% (" + rec.ok.ToStr() + "/" + total.ToStr() + ")"
 end function
