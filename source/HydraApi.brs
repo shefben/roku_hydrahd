@@ -446,7 +446,25 @@ function HA_ParseMirrors(html as String) as Object
         if name = "" then name = U_Trim(U_HtmlDecode(U_FirstMatch(inner, "^\s*([A-Za-z0-9 _.-]{2,30})\s*<")))
         if name = "" then name = "Server " + id
 
+        ' Quality detection: the source HTML inconsistently labels the
+        ' resolution. The original `iframe-server-quality` element only
+        ' fires for a small subset of mirrors - most mirrors carry the
+        ' resolution as a class flag, in a data-quality attribute, or
+        ' inline as plain text inside the button. Layered fallbacks here
+        ' so 1080p / 720p / etc. show up consistently in the picker.
         quality = U_FirstMatch(inner, "iframe-server-quality[^>]*>([^<]+)<")
+        if quality = "" then
+            quality = U_FirstMatch(inner, "data-quality=" + chr(34) + "([^" + chr(34) + "]+)" + chr(34))
+        end if
+        if quality = "" then
+            quality = U_FirstMatch(inner, "(2160p|1080p|720p|480p|360p|4K|FHD|UHD|HD|SD|CAM|TS)")
+        end if
+        if quality = "" then
+            quality = U_FirstMatch(flags, "(2160p|1080p|720p|480p|360p|4K|FHD|UHD|HD|SD|CAM|TS)")
+        end if
+        if quality = "" then
+            quality = U_FirstMatch(link, "(2160p|1080p|720p|480p|4K|FHD|UHD|HD)")
+        end if
         out.Push({
             id: id
             name: name

@@ -44,8 +44,15 @@
         <Group id="panel" translation="[-280, 0]">
             <Rectangle width="280" height="1080" color="0x0a0a0af0" />
             <Rectangle translation="[278, 0]" width="2" height="1080" color="0xff2424ff" opacity="0.7" />
+            <!-- "Browse Movies" / "Browse TV Shows" overflow the 280px
+                 panel at MediumBoldSystemFont (the ButtonGroup default).
+                 SmallBoldSystemFont keeps the long labels on one line
+                 inside minWidth without truncation. -->
             <ButtonGroup id="menuBg" translation="[20, 80]" layoutDirection="vert"
-                         itemSpacings="[14]" minWidth="240" />
+                         itemSpacings="[14]" minWidth="240">
+                <Font role="font" uri="font:SmallBoldSystemFont" />
+                <Font role="focusedFont" uri="font:SmallBoldSystemFont" />
+            </ButtonGroup>
         </Group>
 
         <Animation id="expandAnim" duration="0.22" easeFunction="outQuad" repeat="false">

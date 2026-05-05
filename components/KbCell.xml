@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="KbCell" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="onContent" />
+        <field id="focusPercent" type="float" onChange="onFocus" />
+        <field id="width" type="float" value="70" />
+        <field id="height" type="float" value="60" />
+    </interface>
+    <script type="text/brightscript">
+        <![CDATA[
+        sub init()
+            m.frame = m.top.findNode("frame")
+            m.bg = m.top.findNode("bg")
+            m.label = m.top.findNode("label")
+            applyState(0.0)
+        end sub
+
+        sub onContent()
+            c = m.top.itemContent
+            if c = invalid then return
+            m.label.text = c.title
+            ' MarkupGrid recycles cells - reset to the unfocused look on
+            ' bind so a recycled cell doesn't keep its previous focus
+            ' colour after being moved to a new content slot.
+            applyState(m.top.focusPercent)
+        end sub
+
+        sub onFocus()
+            applyState(m.top.focusPercent)
+        end sub
+
+        sub applyState(f as Float)
+            if f >= 0.5 then
+                m.frame.color = "0xff5555ff"
+                m.bg.color = "0xff2424ff"
+                m.label.color = "0xffffffff"
+            else
+                m.frame.color = "0x202028ff"
+                m.bg.color = "0x484858ff"
+                m.label.color = "0xeeeeeeff"
+            end if
+        end sub
+        ]]>
+    </script>
+    <children>
+        <!-- Outer darker frame gives every key a visible border so each
+             key reads as its own button regardless of focus. -->
+        <Rectangle id="frame" width="70" height="60" color="0x202028ff" />
+        <Rectangle id="bg" translation="[2, 2]" width="66" height="56" color="0x484858ff" />
+        <Label id="label" translation="[0, 0]" width="70" height="60" text=""
+               horizAlign="center" vertAlign="center"
+               font="font:MediumBoldSystemFont" color="0xeeeeeeff" />
+    </children>
+</component>

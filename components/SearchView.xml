@@ -13,15 +13,14 @@
     <children>
         <Label id="title" translation="[60, 10]" text="Search" font="font:LargeBoldSystemFont" color="0xffffffff" />
 
-        <LayoutGroup translation="[60, 70]" layoutDirection="horiz" itemSpacings="[40]">
-            <!-- LEFT COLUMN: recent chips, query display, custom keyboard.
-                 The Roku built-in Keyboard widget absorbs LEFT/RIGHT
-                 internally (it wraps within its own grid and never lets
-                 those keys bubble up), which made it impossible to escape
-                 the keyboard with RIGHT. We rebuild the keyboard out of
-                 horizontal ButtonGroups so the parent's onKeyEvent gets
-                 every directional press at every row's edge. -->
-            <Group>
+        <!-- slidePane wraps the keyboard column AND the results column so a
+             single Animation can scoot both together. In keyboard mode it
+             sits at translation=[0,0] (kb on the left, partial preview of
+             results on the right). When focus moves to the result grid
+             we slide it left so the keyboard goes off-screen and the
+             grid moves in to fill the visible area. -->
+        <Group id="slidePane" translation="[0, 0]">
+            <Group id="kbColumn" translation="[60, 70]">
                 <Label id="chipsLabel" translation="[0, 0]" text="Recent searches"
                        font="font:SmallSystemFont" color="0x808080ff" visible="false" />
                 <LayoutGroup id="chipsRow" translation="[0, 22]" layoutDirection="horiz"
@@ -36,30 +35,34 @@
                 </LayoutGroup>
 
                 <Label id="queryDisplay" translation="[0, 80]" text="Type to search..."
-                       font="font:LargeBoldSystemFont" color="0x808080ff" width="660" />
-                <Rectangle translation="[0, 124]" width="660" height="2" color="0xff2424ff" />
+                       font="font:LargeBoldSystemFont" color="0x808080ff" width="754" />
+                <Rectangle translation="[0, 124]" width="754" height="2" color="0xff2424ff" />
 
-                <ButtonGroup id="kbRow0" translation="[0, 150]" layoutDirection="horiz"
-                             itemSpacings="[6]" minWidth="60" />
-                <ButtonGroup id="kbRow1" translation="[0, 220]" layoutDirection="horiz"
-                             itemSpacings="[6]" minWidth="60" />
-                <ButtonGroup id="kbRow2" translation="[0, 290]" layoutDirection="horiz"
-                             itemSpacings="[6]" minWidth="60" />
-                <ButtonGroup id="kbRow3" translation="[0, 360]" layoutDirection="horiz"
-                             itemSpacings="[6]" minWidth="60" />
-                <ButtonGroup id="kbRow4" translation="[0, 430]" layoutDirection="horiz"
-                             itemSpacings="[6]" minWidth="120" />
+                <!-- Single MarkupGrid replaces five horizontal ButtonGroups.
+                     Horizontal ButtonGroup absorbs UP/DOWN at non-edge
+                     columns, so 2D nav between rows only worked from the
+                     rightmost key. MarkupGrid handles UP/DOWN at every
+                     column and releases LEFT/RIGHT/UP/DOWN at the
+                     respective edges so we can route to the result grid
+                     and the recent-search chips. -->
+                <MarkupGrid id="kbGrid" translation="[0, 150]"
+                            itemSize="[70, 60]"
+                            numColumns="10"
+                            numRows="4"
+                            itemSpacing="[6, 6]"
+                            drawFocusFeedback="false"
+                            itemComponentName="KbCell" />
 
-                <Label id="kbHint" translation="[0, 510]"
-                       text="RIGHT to view results  -  UP for recent searches"
-                       font="font:SmallSystemFont" color="0x808080ff" width="660" />
+                <Label id="kbHint" translation="[0, 430]"
+                       text="OK to type  -  RIGHT to view results  -  UP for recent searches"
+                       font="font:SmallSystemFont" color="0x808080ff" width="754" />
             </Group>
 
-            <Group>
+            <Group id="gridColumn" translation="[854, 70]">
                 <Label id="resultTitle" translation="[0, 80]" text="" font="font:MediumBoldSystemFont" color="0xffffffff" visible="false" />
                 <MarkupGrid id="grid" translation="[0, 110]"
                             itemSize="[230, 380]"
-                            numColumns="3"
+                            numColumns="4"
                             numRows="2"
                             itemSpacing="[16, 24]"
                             vertFocusAnimationStyle="floatingFocus"
@@ -68,6 +71,16 @@
                 <Label id="empty" translation="[0, 160]" text="" font="font:MediumSystemFont"
                        color="0x808080ff" visible="false" />
             </Group>
-        </LayoutGroup>
+        </Group>
+
+        <Animation id="slideAnim" duration="0.3" repeat="false" easeFunction="outQuad">
+            <!-- -820 = enough to push the 60+754-wide keyboard column
+                 fully off the left edge while landing the grid column
+                 (originally at x=854) close to the screen's left margin. -->
+            <Vector2DFieldInterpolator id="slideInterp"
+                key="[0.0, 1.0]"
+                keyValue="[[0,0], [-820,0]]"
+                fieldToInterp="slidePane.translation" />
+        </Animation>
     </children>
 </component>

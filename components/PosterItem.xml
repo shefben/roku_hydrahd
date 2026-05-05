@@ -121,9 +121,8 @@
                 failedBitmapUri="pkg:/images/placeholder.png" loadingBitmapUri="pkg:/images/placeholder.png" />
         <Label id="badge" translation="[8, 8]" text="" font="font:SmallestBoldSystemFont" color="0xffffffff" />
         <Rectangle id="favStarBg" translation="[184, 4]" width="32" height="32" color="0x000000c0" visible="false" />
-        <Label id="favStar" translation="[184, 2]" width="32" height="32" text="★"
-               font="font:LargeBoldSystemFont" color="0xffd24aff"
-               horizAlign="center" vertAlign="center" visible="false" />
+        <Poster id="favStar" translation="[184, 4]" width="32" height="32"
+                uri="pkg:/images/fav_star.png" loadDisplayMode="scaleToFit" visible="false" />
         <Label id="rating" translation="[8, 300]" text="" font="font:SmallestBoldSystemFont" color="0xffd24aff" />
         <Rectangle id="progressTrack" translation="[0, 326]" width="220" height="4" color="0x000000aa" visible="false" />
         <Rectangle id="progressBar" translation="[0, 326]" width="0" height="4" color="0xff2424ff" visible="false" />

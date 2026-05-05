@@ -130,7 +130,35 @@ sub onArgs()
     m.skipBanner.visible = false
 
     print "[Player] qualities="; m.qualities.Count(); " subs="; m.subtitles.Count(); " resumeAt="; m.startPosition
-    startPlayback(m.streamUrl, m.streamFormat)
+    ' Default to the highest-bitrate variant the resolver advertised so
+    ' the stream opens at top quality instead of letting the master
+    ' playlist's ABR cold-start at a lower rendition. Resolver returns
+    ' qualities sorted height-descending; we pick the first variant that
+    ' has a per-rendition URL. "Auto" stays available in the overlay so
+    ' the user can drop back to ABR if their bandwidth can't sustain it.
+    initUrl = m.streamUrl
+    initFmt = m.streamFormat
+    bestIdx = -1
+    bestHeight = -1
+    for i = 0 to m.qualities.Count() - 1
+        q = m.qualities[i]
+        if q.url <> invalid and q.url <> "" then
+            h = 0
+            if q.height <> invalid then h = W_AsInt(q.height)
+            if h > bestHeight then
+                bestHeight = h
+                bestIdx = i
+            end if
+        end if
+    end for
+    if bestIdx >= 0 then
+        top = m.qualities[bestIdx]
+        initUrl = top.url
+        initFmt = "hls"
+        m.activeQuality = bestIdx
+        print "[Player] auto-selecting top quality "; top.label
+    end if
+    startPlayback(initUrl, initFmt)
     renderQualityChips()
     renderCcChips()
 end sub
