@@ -58,6 +58,7 @@ sub W_Write(key as String, data as Object)
     reg = W_Section()
     reg.Write(key, FormatJson(data))
     reg.Flush()
+    S_QueuePush()
 end sub
 
 ' Position is "essentially finished" when within 90 seconds of the end OR
@@ -229,6 +230,9 @@ function W_ListInProgress(limit as Integer) as Object
                         if ctx.href   <> invalid then item.href   = ctx.href
                         if ctx.imdb   <> invalid then item.imdb   = ctx.imdb
                         if ctx.tmdb   <> invalid then item.tmdb   = ctx.tmdb
+                        if ctx.mirrorHost <> invalid then item.mirrorHost = ctx.mirrorHost
+                        if ctx.mirrorLink <> invalid then item.mirrorLink = ctx.mirrorLink
+                        if ctx.mirrorName <> invalid then item.mirrorName = ctx.mirrorName
                         if kind = "tv" then
                             item.season  = W_AsInt(entry.season)
                             item.episode = W_AsInt(entry.episode)
@@ -332,6 +336,7 @@ sub W_AddFavorite(ctx as Object)
     reg = W_FavSection()
     reg.Write(k, FormatJson(payload))
     reg.Flush()
+    S_QueuePushNow()
 end sub
 
 sub W_RemoveFavorite(imdb as String, href as String)
@@ -341,6 +346,7 @@ sub W_RemoveFavorite(imdb as String, href as String)
     if reg.Exists(k) then
         reg.Delete(k)
         reg.Flush()
+        S_QueuePushNow()
     end if
 end sub
 
@@ -415,6 +421,7 @@ sub W_PushSearchQuery(q as String)
     reg = CreateObject("roRegistrySection", "HydraHD")
     reg.Write("searchHistory", FormatJson(out))
     reg.Flush()
+    S_QueuePushNow()
 end sub
 
 sub W_ClearSearchHistory()
@@ -422,6 +429,7 @@ sub W_ClearSearchHistory()
     if reg.Exists("searchHistory") then
         reg.Delete("searchHistory")
         reg.Flush()
+        S_QueuePushNow()
     end if
 end sub
 
@@ -458,6 +466,7 @@ sub W_RecordMirrorOutcome(host as String, success as Boolean)
     reg = W_MirrorSection()
     reg.Write(host, rec.ok.ToStr() + ":" + rec.fail.ToStr())
     reg.Flush()
+    S_QueuePush()
 end sub
 
 ' Ratio in 0..1, or -1 if we have no data on this host yet. The bonus

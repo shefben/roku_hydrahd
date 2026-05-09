@@ -9,6 +9,7 @@
     <script type="text/brightscript" uri="pkg:/components/FavoritesView.brs" />
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
     <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Sync.brs" />
 
     <children>
         <Label id="header" translation="[60, 10]" text="My List" font="font:LargeBoldSystemFont" color="0xffffffff" />

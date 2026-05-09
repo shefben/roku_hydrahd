@@ -59,6 +59,11 @@ sub onResult()
     ' "Continue Watching" goes first when the user has anything in
     ' progress. Tiles drop the user straight into MirrorPicker for the
     ' resume target so they don't have to click through DetailsView.
+    ' Stash the raw in-progress records keyed by tile column index so
+    ' onItemSelected can hand the ResumePicker the full context
+    ' (mirror link, episode slug, exact position) without re-reading
+    ' the registry.
+    m.continueRecords = []
     inProg = W_ListInProgress(20)
     if inProg <> invalid and inProg.Count() > 0 then
         m.continueRowIdx = rootContent.getChildCount()
@@ -80,6 +85,7 @@ sub onResult()
             U_SetCellKind(cell, ip.kind)
             cell.url = ip.href
             U_SetCellPct(cell, ip.pct)
+            m.continueRecords.Push(ip)
         end for
     end if
 
@@ -168,6 +174,43 @@ sub onItemSelected()
     else if href <> "" and Instr(1, href, "/watchseries/") > 0 then
         kind = "tv"
     end if
+    ' Continue Watching tiles open ResumePicker so the user can pick
+    ' between "resume on the previous mirror", "switch mirrors", or
+    ' "pick a different episode/season". DetailsView is no longer in
+    ' the auto-resume hot path - going through it would double the
+    ' wait (DetailsTask + ResolveTask) without giving the user any
+    ' new choices.
+    if rowIdx = m.continueRowIdx and m.continueRecords <> invalid and colIdx < m.continueRecords.Count() then
+        ip = m.continueRecords[colIdx]
+        resumeArgs = {
+            kind:   ip.kind
+            href:   ip.href
+            imdb:   ip.imdb
+            tmdb:   ip.tmdb
+            title:  ip.title
+            poster: ip.poster
+        }
+        if ip.pos <> invalid and ip.pos > 0 then resumeArgs.startPosition = ip.pos
+        if ip.kind = "tv" and ip.season <> invalid and ip.episode <> invalid then
+            ep = {
+                season:  ip.season
+                episode: ip.episode
+            }
+            if ip.slug <> invalid then ep.slug = ip.slug
+            if ip.name <> invalid then ep.name = ip.name
+            resumeArgs.episode = ep
+        end if
+        if ip.mirrorHost <> invalid then resumeArgs.mirrorHost = ip.mirrorHost
+        if ip.mirrorLink <> invalid then resumeArgs.mirrorLink = ip.mirrorLink
+        if ip.mirrorName <> invalid then resumeArgs.mirrorName = ip.mirrorName
+        m.top.requestNav = {
+            action: "open"
+            view: "ResumePicker"
+            args: resumeArgs
+        }
+        return
+    end if
+
     args = {
         kind: kind
         id: item.id
@@ -175,9 +218,6 @@ sub onItemSelected()
         title: item.title
         poster: item.HDPosterUrl
     }
-    ' Continue Watching tiles fast-path into resume - DetailsView will
-    ' fire its Play action automatically once details fetch finishes.
-    if rowIdx = m.continueRowIdx then args.autoResume = true
     m.top.requestNav = {
         action: "open"
         view: "DetailsView"

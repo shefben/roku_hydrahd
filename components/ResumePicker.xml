@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="ResumePicker" extends="Group">
+    <interface>
+        <field id="args" type="assocarray" onChange="onArgs" />
+        <field id="requestNav" type="assocarray" alwaysNotify="true" />
+        <field id="loading" type="bool" alwaysNotify="true" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/ResumePicker.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Sync.brs" />
+
+    <children>
+        <Rectangle width="1920" height="1080" color="0x000000d4" />
+
+        <Poster id="poster" translation="[120, 110]" width="240" height="340"
+                loadDisplayMode="scaleToFit"
+                failedBitmapUri="pkg:/images/placeholder.png" />
+
+        <LayoutGroup translation="[400, 110]" layoutDirection="vert" itemSpacings="[10]">
+            <Label id="title" text="" font="font:LargeBoldSystemFont" color="0xffffffff" width="1400" maxLines="2" />
+            <Label id="subtitle" text="" font="font:MediumSystemFont" color="0xb8b8b8ff" width="1400" maxLines="1" />
+            <Label id="resumeAt" text="" font="font:MediumBoldSystemFont" color="0xffd24aff" width="1400" maxLines="1" />
+        </LayoutGroup>
+
+        <Label translation="[400, 360]" text="How would you like to continue?"
+               font="font:MediumSystemFont" color="0xeeeeeeff" />
+
+        <ButtonGroup id="actions" translation="[400, 410]"
+                     layoutDirection="vert" itemSpacings="[16]"
+                     minWidth="640" />
+
+        <Label id="status" translation="[120, 940]" text=""
+               font="font:SmallSystemFont" color="0xffd24aff" width="1680" maxLines="1" />
+        <Label id="hint" translation="[120, 990]"
+               text="OK to select  -  BACK to cancel"
+               font="font:SmallestSystemFont" color="0x808080ff" />
+    </children>
+</component>

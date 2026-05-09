@@ -4,6 +4,13 @@ sub init()
     m.mirrors = []
     m.args = invalid
 
+    ' Hosts we've already attempted in this picker session. Used to
+    ' drive the auto-cascade ("try every mirror until one works")
+    ' opt-in flow and to avoid looping back to a known-bad mirror.
+    m.triedHosts = {}
+    m.autoCascade = false
+    m.dialog = invalid
+
     m.title = m.top.findNode("title")
     m.subtitle = m.top.findNode("subtitle")
     m.grid = m.top.findNode("mirrorGrid")
@@ -50,7 +57,42 @@ sub onArgs()
     else
         m.subtitle.text = "Movie"
     end if
+    ' "Resume on previous mirror" hands us the saved embed URL so we
+    ' can skip the ServersTask round-trip and go straight to resolve.
+    if a.directMirror <> invalid and a.directMirror.link <> invalid and a.directMirror.link <> "" then
+        resolveDirectMirror(a.directMirror)
+        return
+    end if
     fetchMirrors()
+end sub
+
+' Synthesize a single-row mirror grid, mark the entry active, and kick
+' off ResolveTask exactly the way onMirrorSelected would have. If the
+' resolve fails the user can BACK out to ResumePicker and pick
+' "Choose a different mirror" to refresh the full list.
+sub resolveDirectMirror(dm as Object)
+    name = ""
+    if dm.name <> invalid then name = dm.name
+    host = ""
+    if dm.host <> invalid then host = dm.host
+    if name = "" then name = host
+    mirror = {
+        id: ""
+        name: name
+        link: dm.link
+        host: host
+        qualityHint: ""
+        isPremium: false
+    }
+    m.mirrors = [mirror]
+    root = createObject("roSGNode", "ContentNode")
+    cell = root.createChild("ContentNode")
+    cell.title = name
+    cell.shortDescriptionLine1 = host
+    cell.shortDescriptionLine2 = "Resuming..."
+    m.grid.content = root
+    m.grid.itemSelected = 0
+    onMirrorSelected()
 end sub
 
 sub fetchMirrors()
@@ -150,8 +192,19 @@ end function
 sub onMirrorSelected()
     idx = m.grid.itemSelected
     if idx = invalid or idx < 0 or idx >= m.mirrors.Count() then return
-    mirror = m.mirrors[idx]
+    startResolveForMirror(m.mirrors[idx])
+end sub
+
+' Kick off ResolveTask against a specific mirror dict. Called both
+' from the grid observer and from tryNextUntried() during auto-cascade
+' so we don't depend on grid.itemSelected (which can double-fire the
+' observer when set programmatically to a new value).
+sub startResolveForMirror(mirror as Object)
+    if mirror = invalid then return
     m.activeMirror = mirror
+    if mirror.host <> invalid and mirror.host <> "" then
+        m.triedHosts[mirror.host] = true
+    end if
     m.status.text = "Resolving stream from " + mirror.host + "..."
     m.top.loading = true
     if m.resolve <> invalid then m.resolve.unobserveField("result")
@@ -176,7 +229,33 @@ sub onResolved()
         ' Mark this host as a failed resolve so the next visit ranks it
         ' below mirrors that are still working.
         if m.activeMirror <> invalid then W_RecordMirrorOutcome(m.activeMirror.host, false)
-        m.status.text = "Could not resolve a direct stream from this mirror. Try another."
+        ' "Resume on previous mirror" puts a single-row grid on screen.
+        ' If that mirror is dead now, "try another" is a lie - there's
+        ' no other entry to pick. Fall back to a full server list so
+        ' the user actually has alternatives.
+        if m.args <> invalid and m.args.directMirror <> invalid and m.mirrors.Count() <= 1 then
+            m.args.directMirror = invalid
+            m.status.text = "Saved mirror is no longer working - loading other mirrors..."
+            fetchMirrors()
+            return
+        end if
+        ' If the user already opted into auto-cascade, silently move on
+        ' to the next untried mirror. If we exhaust the list (or there
+        ' was nothing else to try) admit defeat with a clear message.
+        if m.autoCascade then
+            if tryNextUntried() then return
+            m.autoCascade = false
+            m.status.text = "All mirrors are failing - try again later."
+            return
+        end if
+        ' First failure: offer the cascade once, only if there are other
+        ' mirrors we haven't tried yet. Otherwise we'd be promising
+        ' something we can't deliver.
+        if hasUntriedMirror() then
+            promptAutoCascade()
+            return
+        end if
+        m.status.text = "All mirrors are failing - try again later."
         return
     end if
     if m.activeMirror <> invalid then W_RecordMirrorOutcome(m.activeMirror.host, true)
@@ -205,8 +284,13 @@ sub onResolved()
     end if
     if m.args.episode <> invalid then playerArgs.episode = m.args.episode
     if m.args.startPosition <> invalid then playerArgs.startPosition = m.args.startPosition
-    if m.activeMirror <> invalid and m.activeMirror.host <> invalid then
-        playerArgs.mirrorHost = m.activeMirror.host
+    if m.activeMirror <> invalid then
+        if m.activeMirror.host <> invalid then playerArgs.mirrorHost = m.activeMirror.host
+        ' mirrorLink + mirrorName are persisted in saveProgress so the
+        ' Continue Watching ResumePicker can offer "Resume on <host>"
+        ' without re-fetching the server list.
+        if m.activeMirror.link <> invalid then playerArgs.mirrorLink = m.activeMirror.link
+        if m.activeMirror.name <> invalid then playerArgs.mirrorName = m.activeMirror.name
     end if
     if res.chapters <> invalid then playerArgs.chapters = res.chapters
     payload = {
@@ -215,4 +299,68 @@ sub onResolved()
         args: playerArgs
     }
     m.top.requestNav = payload
+end sub
+
+' True iff there's at least one mirror in the current list whose host
+' we haven't already attempted in this session. Hosts are deduplicated
+' (some pages list the same upstream under multiple labels) so a single
+' failure also counts the duplicates as tried.
+function hasUntriedMirror() as Boolean
+    if m.mirrors = invalid then return false
+    for i = 0 to m.mirrors.Count() - 1
+        host = ""
+        if m.mirrors[i].host <> invalid then host = m.mirrors[i].host
+        if host = "" or not m.triedHosts.DoesExist(host) then return true
+    end for
+    return false
+end function
+
+' Pick the first untried mirror, mark it active, and kick off resolve.
+' Returns false if the list has been exhausted (caller should surface
+' the "all mirrors failing" message). We avoid touching
+' grid.itemSelected here so we don't accidentally fire the grid
+' observer (which would race against startResolveForMirror).
+function tryNextUntried() as Boolean
+    if m.mirrors = invalid then return false
+    for i = 0 to m.mirrors.Count() - 1
+        host = ""
+        if m.mirrors[i].host <> invalid then host = m.mirrors[i].host
+        if host = "" or not m.triedHosts.DoesExist(host) then
+            startResolveForMirror(m.mirrors[i])
+            return true
+        end if
+    end for
+    return false
+end function
+
+' Standard Roku Dialog asking the user whether to auto-iterate through
+' remaining mirrors. The dialog is parented to the scene's `dialog`
+' field so it floats over the picker and grabs focus. Picking Yes flips
+' m.autoCascade and starts the iteration; No leaves the user on the
+' grid with the "try another" hint.
+sub promptAutoCascade()
+    dlg = createObject("roSGNode", "Dialog")
+    dlg.title = "Mirror failed"
+    dlg.message = "This mirror could not be loaded. Try the remaining mirrors automatically until one works?"
+    dlg.buttons = ["Yes, try the rest", "No"]
+    dlg.observeField("buttonSelected", "onCascadeDialogButton")
+    m.dialog = dlg
+    m.top.getScene().dialog = dlg
+end sub
+
+sub onCascadeDialogButton()
+    if m.dialog = invalid then return
+    idx = m.dialog.buttonSelected
+    m.dialog.close = true
+    m.dialog = invalid
+    if idx = 0 then
+        m.autoCascade = true
+        m.status.text = "Trying remaining mirrors..."
+        if not tryNextUntried() then
+            m.autoCascade = false
+            m.status.text = "All mirrors are failing - try again later."
+        end if
+    else
+        m.status.text = "Could not resolve a direct stream from this mirror. Try another."
+    end if
 end sub

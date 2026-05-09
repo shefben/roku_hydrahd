@@ -10,6 +10,7 @@
 
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Sync.brs" />
 
     <children>
         <Rectangle id="bg" color="0x0a0a0aff" width="1920" height="1080" />

@@ -84,7 +84,7 @@ from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPCookieProcessor, OpenerDirector, Request, build_opener
+from urllib.request import HTTPCookieProcessor, OpenerDirector, Request, build_opener, urlopen
 
 LOG = logging.getLogger("hydrahd-resolver")
 
@@ -166,6 +166,18 @@ _COOKIE_CACHE_PATH: str | None = None
 _COOKIE_CACHE_LOCK = threading.Lock()
 _COOKIE_FLUSH_THREAD: threading.Thread | None = None
 _COOKIE_FLUSH_STOP = threading.Event()
+
+# --- Channel state persistence --------------------------------------
+#
+# Roku registry is wiped on a full uninstall, so favorites / continue-
+# watching / watchlist disappear if the user removes the dev channel
+# rather than using "Replace". The channel ships its registry snapshot
+# to /state/put on every relevant write, and pulls it back from
+# /state/get on boot, keyed by GetChannelClientId() so the same device
+# rejoins its own data after a wipe.
+_STATE_DIR: str | None = None
+_STATE_LOCK = threading.Lock()
+_STATE_DID_RE = re.compile(r"[^A-Za-z0-9_.-]")
 
 
 def _jar_of(opener: OpenerDirector) -> http.cookiejar.CookieJar | None:
@@ -515,6 +527,247 @@ def extract_chapters_from_hls(stream_url: str, refer: str) -> list[dict[str, Any
         if cend > cstart:
             out.append({"kind": kind, "start": cstart, "end": cend})
             seen.add(kind)
+    return out
+
+
+# --- IntroDB integration --------------------------------------------
+#
+# https://api.introdb.app exposes community-curated skip segments per
+# TV episode. We use it as a third chapter source after HTML scrape and
+# HLS DATERANGE: if the embed didn't already supply intro/recap/outro,
+# IntroDB very often does. The service is TV-only - movies have no
+# matching endpoint per the OpenAPI spec.
+#
+# Endpoint:
+#   GET /segments?imdb_id=<imdb>&season=<S>&episode=<E>
+#   200: { intro: { start_ms, end_ms, start_sec, end_sec, ... } | null,
+#          recap: { ... } | null,
+#          outro: { ... } | null }
+#
+# We cache successful (and empty) lookups in-process so a 4-mirror
+# auto-cascade for the same episode only hits IntroDB once.
+
+_INTRODB_TIMEOUT = 5.0
+_INTRODB_CACHE_TTL = 1800.0  # 30 minutes
+_INTRODB_CACHE_MAX = 256
+_INTRODB_CACHE: "OrderedDict[str, tuple[float, list[dict[str, Any]]]]" = OrderedDict()
+_INTRODB_CACHE_LOCK = threading.Lock()
+
+
+def _introdb_cache_get(key: str) -> list[dict[str, Any]] | None:
+    with _INTRODB_CACHE_LOCK:
+        ent = _INTRODB_CACHE.get(key)
+        if not ent:
+            return None
+        ts, val = ent
+        if time.time() - ts > _INTRODB_CACHE_TTL:
+            _INTRODB_CACHE.pop(key, None)
+            return None
+        _INTRODB_CACHE.move_to_end(key)
+        return list(val)
+
+
+def _introdb_cache_put(key: str, val: list[dict[str, Any]]) -> None:
+    with _INTRODB_CACHE_LOCK:
+        _INTRODB_CACHE[key] = (time.time(), list(val))
+        _INTRODB_CACHE.move_to_end(key)
+        while len(_INTRODB_CACHE) > _INTRODB_CACHE_MAX:
+            _INTRODB_CACHE.popitem(last=False)
+
+
+def _introdb_segment_seconds(seg: dict[str, Any]) -> tuple[float, float] | None:
+    start_ms = seg.get("start_ms")
+    end_ms = seg.get("end_ms")
+    if isinstance(start_ms, (int, float)) and isinstance(end_ms, (int, float)) and end_ms > start_ms:
+        return float(start_ms) / 1000.0, float(end_ms) / 1000.0
+    start_sec = seg.get("start_sec")
+    end_sec = seg.get("end_sec")
+    if isinstance(start_sec, (int, float)) and isinstance(end_sec, (int, float)) and end_sec > start_sec:
+        return float(start_sec), float(end_sec)
+    return None
+
+
+def introdb_segments(imdb: str, season: int, episode: int) -> list[dict[str, Any]]:
+    if not imdb or not imdb.startswith("tt"):
+        return []
+    if season <= 0 or episode <= 0:
+        return []
+    key = f"{imdb}:{season}:{episode}"
+    cached = _introdb_cache_get(key)
+    if cached is not None:
+        return cached
+    qs = urlparse.urlencode({"imdb_id": imdb, "season": season, "episode": episode})
+    url = f"https://api.introdb.app/segments?{qs}"
+    out: list[dict[str, Any]] = []
+    try:
+        req = Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
+        # Plain urlopen here - no cookie jar needed for a public API and
+        # we don't want to thread IntroDB sessions through the per-client
+        # opener that the resolver maintains for upstream providers.
+        with urlopen(req, timeout=_INTRODB_TIMEOUT) as resp:
+            if resp.status != 200:
+                LOG.info("introdb %s -> HTTP %s (no chapters)", key, resp.status)
+                _introdb_cache_put(key, out)
+                return out
+            payload = json.loads(resp.read().decode("utf-8", "replace"))
+    except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
+        LOG.info("introdb fetch failed for %s: %s", key, exc)
+        _introdb_cache_put(key, out)
+        return out
+    if not isinstance(payload, dict):
+        LOG.info("introdb %s -> non-dict payload", key)
+        _introdb_cache_put(key, out)
+        return out
+    for raw_kind, normalized in (
+        ("intro", "intro"),
+        ("recap", "recap"),
+        ("outro", "outro"),
+        ("credits", "outro"),
+    ):
+        seg = payload.get(raw_kind)
+        if not isinstance(seg, dict):
+            continue
+        bounds = _introdb_segment_seconds(seg)
+        if bounds is None:
+            continue
+        start, end = bounds
+        out.append({"kind": normalized, "start": start, "end": end})
+    LOG.info("introdb %s -> %d chapters: %s", key, len(out),
+             ",".join(c["kind"] for c in out) or "none")
+    _introdb_cache_put(key, out)
+    return out
+
+
+# --- TMDB → IMDB resolution -----------------------------------------
+#
+# IntroDB only accepts IMDB ids, but most provider embed URLs (airflix1,
+# vidrock, vidsrc, ...) carry only a TMDB id, and the current HydraHD
+# page no longer inlines a `tt\d+` either - it stores the slug as the
+# `imdbID` JS const, which is useless for IntroDB. Without an IMDB id
+# the IntroDB lookup falls through and the Skip Intro / Skip Credits
+# banner never appears.
+#
+# Recover the IMDB id by:
+#   1. Extracting the slug from the original page URL (refer).
+#   2. Hitting IMDb's public suggest endpoint with the slugified title.
+#   3. Filtering candidates by kind (tvSeries vs movie).
+#
+# IMDb suggest is unauthenticated, fast (~200ms), and returns canonical
+# `tt\d+` ids. Results are cached in-process so a 4-mirror auto-cascade
+# only triggers one lookup per title.
+
+_IMDB_LOOKUP_TIMEOUT = 4.0
+_IMDB_LOOKUP_CACHE_TTL = 1800.0
+_IMDB_LOOKUP_CACHE_MAX = 256
+_IMDB_LOOKUP_CACHE: "OrderedDict[str, tuple[float, str]]" = OrderedDict()
+_IMDB_LOOKUP_CACHE_LOCK = threading.Lock()
+_IMDB_TT_RE = re.compile(r"\b(tt\d{6,})\b")
+_IMDB_SLUG_SUFFIXES = (
+    "-online-free", "-online", "-full-movie", "-full-episode",
+    "-watch", "-stream", "-free",
+)
+
+
+def slug_to_query(slug: str) -> str:
+    """Turn a HydraHD-style URL slug ("the-matrix-online-free") into a
+    title query suitable for IMDb suggest ("the matrix")."""
+    if not slug:
+        return ""
+    s = slug.lower().strip()
+    for suffix in _IMDB_SLUG_SUFFIXES:
+        if s.endswith(suffix):
+            s = s[: -len(suffix)]
+            break
+    return s.replace("-", " ").replace("_", " ").strip()
+
+
+def imdb_lookup_by_title(title: str, kind: str) -> str:
+    """Resolve a title to an IMDB id via IMDb's public suggest endpoint.
+    `kind` is "tv" or "movie"; we prefer matching candidates when both
+    a series and a film share the title (e.g. "Severance")."""
+    if not title:
+        return ""
+    norm = re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_")
+    if not norm:
+        return ""
+    url = f"https://v3.sg.media-imdb.com/suggestion/x/{norm}.json"
+    try:
+        req = Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
+        with urlopen(req, timeout=_IMDB_LOOKUP_TIMEOUT) as resp:
+            if resp.status != 200:
+                return ""
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+    except (HTTPError, URLError, TimeoutError, OSError, ValueError):
+        return ""
+    items = data.get("d") or []
+    target_qid = "tvSeries" if kind == "tv" else "movie"
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        if it.get("qid") == target_qid:
+            iid = it.get("id")
+            if isinstance(iid, str) and iid.startswith("tt"):
+                return iid
+    # Same-kind candidate not found; fall back to the first tt id of any
+    # kind (better than nothing for IntroDB which only checks the id).
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        iid = it.get("id")
+        if isinstance(iid, str) and iid.startswith("tt"):
+            return iid
+    return ""
+
+
+def imdb_from_refer(url: str, kind: str = "") -> str:
+    """Best-effort IMDB id lookup from a HydraHD `refer` URL. Returns
+    "" when the URL has no slug or IMDb suggest finds nothing. Caches
+    results (including misses) for 30 minutes."""
+    if not url or not url.lower().startswith(("http://", "https://")):
+        return ""
+    cache_key = f"{kind}|{url}"
+    with _IMDB_LOOKUP_CACHE_LOCK:
+        ent = _IMDB_LOOKUP_CACHE.get(cache_key)
+        if ent:
+            ts, val = ent
+            if time.time() - ts <= _IMDB_LOOKUP_CACHE_TTL:
+                _IMDB_LOOKUP_CACHE.move_to_end(cache_key)
+                return val
+            _IMDB_LOOKUP_CACHE.pop(cache_key, None)
+
+    found = ""
+    try:
+        parsed = urlparse.urlparse(url)
+        slug = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+    except Exception:
+        slug = ""
+    title = slug_to_query(slug)
+    if title:
+        found = imdb_lookup_by_title(title, kind)
+
+    with _IMDB_LOOKUP_CACHE_LOCK:
+        _IMDB_LOOKUP_CACHE[cache_key] = (time.time(), found)
+        _IMDB_LOOKUP_CACHE.move_to_end(cache_key)
+        while len(_IMDB_LOOKUP_CACHE) > _IMDB_LOOKUP_CACHE_MAX:
+            _IMDB_LOOKUP_CACHE.popitem(last=False)
+    LOG.info("imdb-from-refer %s (%s) -> %s", url, kind or "?", found or "none")
+    return found
+
+
+def merge_chapters(primary: list[dict[str, Any]],
+                   secondary: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Combine two chapter lists, keeping the primary entry's window
+    when both sources have data for the same kind. The Roku player only
+    looks for the first match per kind so duplicates are otherwise
+    just wasted bandwidth."""
+    out = list(primary)
+    seen = {c.get("kind") for c in out if c.get("kind")}
+    for ch in secondary:
+        kind = ch.get("kind")
+        if not kind or kind in seen:
+            continue
+        out.append(ch)
+        seen.add(kind)
     return out
 
 
@@ -2012,6 +2265,49 @@ def _start_discovery_responder(http_port: int, disc_port: int = DISCOVERY_PORT) 
     return t
 
 
+def _state_path_for(did: str) -> str | None:
+    if not _STATE_DIR:
+        return None
+    safe = _STATE_DID_RE.sub("_", did)[:128]
+    if not safe:
+        return None
+    return os.path.join(_STATE_DIR, f"state-{safe}.json")
+
+
+def _state_load(did: str) -> dict[str, Any]:
+    path = _state_path_for(did)
+    if not path:
+        return {}
+    with _STATE_LOCK:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError) as exc:
+            LOG.info("state load failed for %s: %s", did, exc)
+        return {}
+
+
+def _state_save(did: str, payload: dict[str, Any]) -> bool:
+    path = _state_path_for(did)
+    if not path:
+        return False
+    with _STATE_LOCK:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f)
+            os.replace(tmp, path)
+            return True
+        except OSError as exc:
+            LOG.info("state save failed for %s: %s", did, exc)
+            return False
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "HydraHDResolver/1.0"
 
@@ -2029,6 +2325,9 @@ class Handler(BaseHTTPRequestHandler):
             self._respond(200, {"providers": [needle for needle, _ in PROVIDERS]})
             return
         params = dict(urlparse.parse_qsl(parsed.query))
+        if parsed.path == "/state":
+            self._serve_state_get(params)
+            return
         # Per-Roku cookie jar so concurrent devices don't trample each
         # other's session state. cid falls back to the client's TCP peer
         # address so older channel builds still get *some* isolation.
@@ -2048,6 +2347,49 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_HEAD(self) -> None:  # noqa: N802
         self.do_GET()
+
+    def do_POST(self) -> None:  # noqa: N802
+        parsed = urlparse.urlparse(self.path)
+        params = dict(urlparse.parse_qsl(parsed.query))
+        if parsed.path == "/state":
+            self._serve_state_put(params)
+            return
+        self._respond(404, {"error": "not found"})
+
+    def _serve_state_get(self, params: dict[str, str]) -> None:
+        did = params.get("did", "")
+        if not did:
+            self._respond(400, {"error": "missing did"})
+            return
+        self._respond(200, _state_load(did))
+
+    def _serve_state_put(self, params: dict[str, str]) -> None:
+        did = params.get("did", "")
+        if not did:
+            self._respond(400, {"error": "missing did"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            length = 0
+        # 1 MiB cap - the Roku registry doesn't hold anywhere near that
+        # much, but guard against malformed clients.
+        if length <= 0 or length > 1_048_576:
+            self._respond(400, {"error": "bad length"})
+            return
+        try:
+            raw = self.rfile.read(length)
+            payload = json.loads(raw.decode("utf-8", "replace"))
+        except (ValueError, OSError) as exc:
+            self._respond(400, {"error": f"bad json: {exc}"})
+            return
+        if not isinstance(payload, dict):
+            self._respond(400, {"error": "payload must be object"})
+            return
+        if _state_save(did, payload):
+            self._respond(200, {"ok": True})
+        else:
+            self._respond(500, {"error": "save failed"})
 
     # ---- /resolve ------------------------------------------------------
 
@@ -2074,6 +2416,48 @@ class Handler(BaseHTTPRequestHandler):
             # Roku ResolveTask treats 204 as "try another mirror".
             self._respond(204, {"url": ""})
             return
+
+        # Augment chapter list with IntroDB data. The HTML/HLS scraping
+        # done inside make_result usually finds nothing (most embeds
+        # don't ship skip metadata), so IntroDB is what actually
+        # populates Skip Intro / Next Episode buttons in practice.
+        # Merge keeps any kinds the resolver already supplied so a
+        # provider-native chapter (more accurate for that mirror) wins
+        # over the community average.
+        try:
+            ids = extract_content_ids(
+                embed,
+                params.get("kind", ""),
+                params.get("imdb", ""),
+                params.get("tmdb", ""),
+                params.get("season", ""),
+                params.get("episode", ""),
+            )
+            imdb_id = ids.get("imdb", "") or params.get("imdb", "")
+            try:
+                season_int = int(ids.get("season") or params.get("season") or 0)
+                episode_int = int(ids.get("episode") or params.get("episode") or 0)
+            except ValueError:
+                season_int = 0
+                episode_int = 0
+            # Most provider embed URLs (airflix1, vidrock, vidsrc) carry
+            # only TMDB; if the channel didn't supply IMDB explicitly we
+            # would otherwise skip IntroDB entirely. Recover an IMDB id
+            # from the original HydraHD page (sent as `refer`) so
+            # chapters work regardless of which mirror was picked.
+            if not imdb_id and refer and season_int > 0 and episode_int > 0:
+                imdb_id = imdb_from_refer(refer, params.get("kind", ""))
+            if imdb_id and season_int > 0 and episode_int > 0:
+                idb = introdb_segments(imdb_id, season_int, episode_int)
+                if idb:
+                    result["chapters"] = merge_chapters(result.get("chapters") or [], idb)
+            elif params.get("kind", "") == "tv":
+                LOG.info(
+                    "introdb skipped: imdb=%r season=%r episode=%r (need all three)",
+                    imdb_id, season_int, episode_int,
+                )
+        except Exception as exc:  # noqa: BLE001
+            LOG.info("introdb merge failed for %s: %s", embed, exc)
 
         # Wrap the upstream stream/subtitle URLs in /stream so the
         # resolver's IP + headers are what actually reaches the CDN.
@@ -2339,6 +2723,14 @@ def main() -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
+
+    global _STATE_DIR
+    _STATE_DIR = args.state_dir
+    try:
+        os.makedirs(_STATE_DIR, exist_ok=True)
+    except OSError as exc:
+        LOG.warning("could not create state dir %s: %s", _STATE_DIR, exc)
+    LOG.info("channel state dir: %s", _STATE_DIR)
 
     if not args.no_cookie_cache:
         cookie_path = os.path.join(args.state_dir, "cookies.pickle")

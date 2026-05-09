@@ -9,6 +9,7 @@
     <script type="text/brightscript" uri="pkg:/components/HomeView.brs" />
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
     <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Sync.brs" />
 
     <children>
         <!-- 2 rows visible. itemSize.y = poster 380 + label headroom 80

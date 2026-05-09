@@ -19,6 +19,12 @@ sub init()
 
     m.actionBar = m.top.findNode("actionBar")
     m.actionBar.observeField("buttonSelected", "onActionBar")
+    ' Action-bar labels. The skip-intro / play-next-episode entry is
+    ' prepended in rebuildActionBar() while a chapter window is active
+    ' so the user always has access to the skip action - even after
+    ' the floating banner has faded. onActionBar dispatches by label
+    ' (not index) so the dynamic button doesn't shift everything else.
+    m.baseActionLabels = ["Resume", "Quality", "Subtitles", "CC Settings", "Audio", "Stop"]
 
     m.qualityRow.observeField("itemSelected", "onQualityChosen")
     m.ccRow.observeField("itemSelected", "onCcChosen")
@@ -51,13 +57,43 @@ sub init()
     m.lastSavedPos = -999
     m.progressSaved = false
 
-    ' Skip Intro / Skip Credits banner state. chapters is filled from
-    ' args; activeChapter remembers the entry the playhead is inside so
-    ' an OK press during the window can act on it.
+    ' Skip Intro / Play Next Episode banner state. Two distinct
+    ' visual modes share the skipBanner node:
+    '   - intro/recap: shown for 5s, then opacity-faded out by
+    '     skipFadeAnim. After fade the action bar in the overlay still
+    '     surfaces "Skip Intro" / "Skip Recap" until the playhead
+    '     leaves the chapter window.
+    '   - outro (TV episodes only, only when the queue has another
+    '     episode after the current one): shown with a 5-second
+    '     countdown bar (skipCountdown / skipCountdownFill driven by
+    '     skipCountdownAnim) and a paired skipBannerTimer that fires
+    '     performSkip() to auto-advance. BACK during the countdown
+    '     cancels (m.bannerDismissed) so the user can finish watching
+    '     the credits manually; OK skips immediately.
     m.skipBanner = m.top.findNode("skipBanner")
     m.skipLabel = m.top.findNode("skipLabel")
+    m.skipCountdown = m.top.findNode("skipCountdown")
+    m.skipCountdownFill = m.top.findNode("skipCountdownFill")
+    m.skipBannerTimer = m.top.findNode("skipBannerTimer")
+    m.skipBannerTimer.observeField("fire", "onSkipBannerTimerFire")
+    m.skipFadeAnim = m.top.findNode("skipFadeAnim")
+    m.skipCountdownAnim = m.top.findNode("skipCountdownAnim")
     m.chapters = []
     m.activeChapter = invalid
+    m.activeChapterKind = ""
+    m.activeChapterIsCountdown = false
+    m.bannerDismissed = false
+
+    ' Populate the action bar at least once so it has something for
+    ' the user to focus on when the overlay first opens.
+    rebuildActionBar()
+
+    ' In-place episode advance state. m.advance is invalid except while
+    ' a "Next Episode" cascade is running; populated with the next ep
+    ' info, the mirror list, and the index of the mirror we're trying.
+    m.advanceOverlay = m.top.findNode("advanceOverlay")
+    m.advanceStatus = m.top.findNode("advanceStatus")
+    m.advance = invalid
 
     applyCcGlobal()
 
@@ -126,10 +162,13 @@ sub onArgs()
     else
         m.chapters = []
     end if
-    m.activeChapter = invalid
-    m.skipBanner.visible = false
+    ' Drop any skip-banner state from the previous episode/movie so a
+    ' stale 5s timer or fade animation doesn't bleed into the new
+    ' stream. updateSkipBanner will re-establish state once playback
+    ' enters the new chapters' windows.
+    clearActiveChapter()
 
-    print "[Player] qualities="; m.qualities.Count(); " subs="; m.subtitles.Count(); " resumeAt="; m.startPosition
+    print "[Player] qualities="; m.qualities.Count(); " subs="; m.subtitles.Count(); " chapters="; m.chapters.Count(); " resumeAt="; m.startPosition
     ' Default to the highest-bitrate variant the resolver advertised so
     ' the stream opens at top quality instead of letting the master
     ' playlist's ABR cold-start at a lower rendition. Resolver returns
@@ -246,6 +285,11 @@ sub onVideoState()
     end if
 end sub
 
+' tryAutoAdvance now keeps the user inside PlayerView. When there's a
+' next episode in the queue, kick off the in-place advance pipeline
+' (saved mirror first, fall back to ServersTask + auto-cascade).
+' Returns true if advance was started so the caller can stop processing
+' the current state - false means there's no next episode to advance to.
 function tryAutoAdvance() as Boolean
     a = m.top.args
     if a = invalid then return false
@@ -257,28 +301,228 @@ function tryAutoAdvance() as Boolean
     nextIdx = idx + 1
     if nextIdx >= queue.Count() then return false
     nextEp = queue[nextIdx]
-    nextArgs = {
-        kind:    "tv"
-        title:   a.title
-        poster:  a.poster
-        imdb:    a.imdb
-        tmdb:    a.tmdb
-        href:    a.href
-        autoPick: true
-        episode: {
-            slug:    nextEp.slug
-            season:  nextEp.season
-            episode: nextEp.episode
-            name:    nextEp.name
-        }
-        episodeQueue:      queue
-        episodeQueueIndex: nextIdx
+    return startEpisodeAdvance(nextEp, nextIdx)
+end function
+
+' --- In-place episode advance ----------------------------------------
+'
+' Skip Credits / playback-finished on a TV show triggers an in-place
+' swap of the player's stream, instead of bouncing back through
+' MirrorPicker. We try the saved mirror first (most likely to work for
+' the next episode of the same show); if it fails or wasn't recorded,
+' we fetch the full server list and iterate through it auto-cascade
+' style. The user only sees a brief "Loading next episode..." card on
+' top of the (paused) Video node, never a different view.
+
+function startEpisodeAdvance(nextEp as Object, nextIdx as Integer) as Boolean
+    a = m.top.args
+    if a = invalid then return false
+
+    m.advance = {
+        ep:           nextEp
+        queueIdx:     nextIdx
+        mirrors:      invalid
+        triedHosts:   {}
+        activeMirror: invalid
+        savedTried:   false
     }
-    m.video.control = "stop"
-    m.status.text = "Loading next episode..."
-    m.top.requestNav = { action: "replace", view: "MirrorPicker", args: nextArgs }
+
+    ' Tear down the floating banner state in case we got here via the
+    ' "finished" path rather than performSkip - finished bypasses
+    ' performSkip / clearActiveChapter and the 5s outro timer or
+    ' fade animation could otherwise still be running underneath the
+    ' "Loading next episode..." overlay.
+    clearActiveChapter()
+    m.video.control = "pause"
+    label = ""
+    if nextEp.season <> invalid and nextEp.episode <> invalid then
+        label = "S" + nextEp.season.ToStr() + "E" + nextEp.episode.ToStr()
+        if nextEp.name <> invalid and nextEp.name <> "" then label = label + " - " + nextEp.name
+    end if
+    m.advanceStatus.text = label
+    m.advanceOverlay.visible = true
+
+    if a.mirrorLink <> invalid and a.mirrorLink <> "" then
+        savedMirror = {
+            host: ""
+            link: a.mirrorLink
+            name: ""
+        }
+        if a.mirrorHost <> invalid then savedMirror.host = a.mirrorHost
+        if a.mirrorName <> invalid then savedMirror.name = a.mirrorName
+        m.advance.savedTried = true
+        if savedMirror.host <> "" then m.advance.triedHosts[savedMirror.host] = true
+        startAdvanceResolve(savedMirror)
+        return true
+    end if
+
+    fetchAdvanceServers()
     return true
 end function
+
+sub fetchAdvanceServers()
+    a = m.top.args
+    if a = invalid or m.advance = invalid then return
+    m.advanceStatus.text = "Finding mirrors..."
+    if m.advanceServersTask <> invalid then m.advanceServersTask.unobserveField("result")
+    task = createObject("roSGNode", "ServersTask")
+    task.observeField("result", "onAdvanceServersResult")
+    task.kind = "tv"
+    if a.imdb <> invalid then task.imdb = a.imdb
+    if a.tmdb <> invalid then task.tmdb = a.tmdb
+    if a.href <> invalid then task.refer = a.href
+    task.season = m.advance.ep.season
+    task.episode = m.advance.ep.episode
+    if m.advance.ep.slug <> invalid then task.slug = m.advance.ep.slug
+    m.advanceServersTask = task
+    task.control = "RUN"
+end sub
+
+sub onAdvanceServersResult()
+    if m.advanceServersTask = invalid or m.advance = invalid then return
+    res = m.advanceServersTask.result
+    if res = invalid or res.mirrors = invalid or res.mirrors.Count() = 0 then
+        showAdvanceFailure("No mirrors available for the next episode.")
+        return
+    end if
+    m.advance.mirrors = res.mirrors
+    if not advanceTryNextMirror() then
+        showAdvanceFailure("All mirrors failed for the next episode.")
+    end if
+end sub
+
+function advanceTryNextMirror() as Boolean
+    if m.advance = invalid or m.advance.mirrors = invalid then return false
+    for i = 0 to m.advance.mirrors.Count() - 1
+        host = ""
+        if m.advance.mirrors[i].host <> invalid then host = m.advance.mirrors[i].host
+        if host = "" or not m.advance.triedHosts.DoesExist(host) then
+            startAdvanceResolve(m.advance.mirrors[i])
+            return true
+        end if
+    end for
+    return false
+end function
+
+sub startAdvanceResolve(mirror as Object)
+    if mirror = invalid or m.advance = invalid then return
+    a = m.top.args
+    if a = invalid then return
+    m.advance.activeMirror = mirror
+    if mirror.host <> invalid and mirror.host <> "" then
+        m.advance.triedHosts[mirror.host] = true
+    end if
+    label = "Resolving"
+    if mirror.host <> invalid and mirror.host <> "" then label = label + " " + mirror.host
+    label = label + "..."
+    m.advanceStatus.text = label
+    if m.advanceResolveTask <> invalid then m.advanceResolveTask.unobserveField("result")
+    task = createObject("roSGNode", "ResolveTask")
+    task.observeField("result", "onAdvanceResolveResult")
+    task.embedUrl = mirror.link
+    if a.href <> invalid then task.refer = a.href
+    task.kind = "tv"
+    if a.imdb <> invalid then task.imdb = a.imdb
+    if a.tmdb <> invalid then task.tmdb = a.tmdb
+    task.season = m.advance.ep.season
+    task.episode = m.advance.ep.episode
+    m.advanceResolveTask = task
+    task.control = "RUN"
+end sub
+
+sub onAdvanceResolveResult()
+    if m.advanceResolveTask = invalid or m.advance = invalid then return
+    res = m.advanceResolveTask.result
+    if res = invalid or res.url = invalid or res.url = "" then
+        if m.advance.activeMirror <> invalid and m.advance.activeMirror.host <> invalid then
+            W_RecordMirrorOutcome(m.advance.activeMirror.host, false)
+        end if
+        ' Saved-mirror was tried first without a server list; if it
+        ' failed we still need the full list to iterate.
+        if m.advance.mirrors = invalid then
+            fetchAdvanceServers()
+            return
+        end if
+        if not advanceTryNextMirror() then
+            showAdvanceFailure("All mirrors failed for the next episode.")
+        end if
+        return
+    end if
+    if m.advance.activeMirror <> invalid and m.advance.activeMirror.host <> invalid then
+        W_RecordMirrorOutcome(m.advance.activeMirror.host, true)
+    end if
+    completeAdvance(res)
+end sub
+
+sub completeAdvance(res as Object)
+    a = m.top.args
+    if a = invalid or m.advance = invalid then return
+
+    nextEp = m.advance.ep
+    epDict = {
+        slug:    ""
+        season:  nextEp.season
+        episode: nextEp.episode
+        name:    ""
+    }
+    if nextEp.slug <> invalid then epDict.slug = nextEp.slug
+    if nextEp.name <> invalid then epDict.name = nextEp.name
+    a.episode = epDict
+    a.episodeQueueIndex = m.advance.queueIdx
+    a.startPosition = 0
+    a.url = res.url
+    a.streamFormat = res.streamFormat
+    a.qualities = res.qualities
+    a.subtitles = res.subtitles
+    referer = ""
+    if res.referer <> invalid then referer = res.referer
+    userAgent = ""
+    if res.userAgent <> invalid then userAgent = res.userAgent
+    a.referer = referer
+    a.userAgent = userAgent
+    if m.advance.activeMirror <> invalid then
+        if m.advance.activeMirror.host <> invalid then a.mirrorHost = m.advance.activeMirror.host
+        if m.advance.activeMirror.link <> invalid then a.mirrorLink = m.advance.activeMirror.link
+        if m.advance.activeMirror.name <> invalid then a.mirrorName = m.advance.activeMirror.name
+    end if
+    if res.chapters <> invalid then
+        a.chapters = res.chapters
+    else
+        a.chapters = invalid
+    end if
+    sub2 = "S" + epDict.season.ToStr() + "E" + epDict.episode.ToStr()
+    if epDict.name <> "" then sub2 = sub2 + " - " + epDict.name
+    a.subtitle = sub2
+
+    m.advance = invalid
+    m.advanceOverlay.visible = false
+    ' onArgs re-reads m.top.args end-to-end and starts playback with the
+    ' new stream. We mutated the dict in place, so calling onArgs picks
+    ' those changes up without firing the field observer.
+    onArgs()
+end sub
+
+sub showAdvanceFailure(msg as String)
+    m.advance = invalid
+    if m.advanceStatus <> invalid then m.advanceStatus.text = msg
+end sub
+
+' Tear down any in-flight advance so a user-driven BACK out of the
+' overlay leaves the view in a clean state.
+sub cancelAdvance()
+    if m.advanceServersTask <> invalid then
+        m.advanceServersTask.unobserveField("result")
+        m.advanceServersTask.control = "STOP"
+        m.advanceServersTask = invalid
+    end if
+    if m.advanceResolveTask <> invalid then
+        m.advanceResolveTask.unobserveField("result")
+        m.advanceResolveTask.control = "STOP"
+        m.advanceResolveTask = invalid
+    end if
+    m.advance = invalid
+    m.advanceOverlay.visible = false
+end sub
 
 sub onVideoPosition()
     posSec = W_AsInt(m.video.position)
@@ -292,48 +536,180 @@ sub onVideoPosition()
     if Abs(posSec - m.lastSavedPos) >= 5 then saveProgress(false)
 end sub
 
-' Show the bottom-right skip banner whenever the playhead falls inside
-' a chapter the resolver tagged as intro / outro. We never invent
-' chapter data, so an empty m.chapters keeps the banner permanently
-' hidden and the user gets a totally normal player.
+' Show the floating skip prompt when the playhead falls inside a
+' chapter the resolver tagged. Chapters never come from us - if
+' m.chapters is empty the banner stays permanently hidden.
+'
+' Behavior per kind:
+'   intro / recap: show for 5s then opacity-fade. After the fade the
+'     action bar in the overlay still surfaces the skip option until
+'     the playhead leaves the window. OK during the visible window
+'     skips past the chapter.
+'   outro: TV-only and only when there's another queued episode.
+'     Shows a 5s countdown bar that auto-advances when the timer
+'     fires; OK advances immediately, BACK cancels (lets the user
+'     watch the credits) without leaving the chapter. Movies and
+'     TV finales never see an outro banner at all.
 sub updateSkipBanner(posSec as Integer)
     if m.chapters = invalid or m.chapters.Count() = 0 then
-        if m.activeChapter <> invalid or m.skipBanner.visible then
-            m.activeChapter = invalid
-            m.skipBanner.visible = false
-        end if
+        clearActiveChapter()
         return
     end if
+    ' `end` is a BrightScript reserved keyword - `ch.end` evaluates to
+    ' invalid even though the parser accepts it, so use bracket access.
     hit = invalid
     for each ch in m.chapters
         cs = W_AsInt(ch.start)
-        ce = W_AsInt(ch.end)
+        ce = W_AsInt(ch["end"])
         if posSec >= cs and posSec < ce then
             hit = ch
             exit for
         end if
     end for
     if hit = invalid then
-        if m.activeChapter <> invalid or m.skipBanner.visible then
-            m.activeChapter = invalid
-            m.skipBanner.visible = false
-        end if
+        clearActiveChapter()
         return
     end if
-    if m.activeChapter <> invalid and m.activeChapter.start = hit.start and m.activeChapter.end = hit.end then
+    ' Already inside this exact chapter? Don't restart the timer or
+    ' reset the dismissed flag - the position observer fires every
+    ' second and we don't want to revive a banner the user already
+    ' dismissed via BACK or already saw fade out.
+    if m.activeChapter <> invalid and m.activeChapter.start = hit.start and m.activeChapter["end"] = hit["end"] then
         return
     end if
-    m.activeChapter = hit
-    kind = ""
+
+    kind = "intro"
     if hit.kind <> invalid then kind = hit.kind
-    if kind = "outro" then
-        m.skipLabel.text = "> Skip Credits   -   press OK"
-    else if kind = "recap" then
-        m.skipLabel.text = "> Skip Recap   -   press OK"
-    else
-        m.skipLabel.text = "> Skip Intro   -   press OK"
+
+    a = m.top.args
+    isTv = (a <> invalid and a.kind = "tv")
+    hasNextEp = false
+    if isTv and a.episodeQueue <> invalid and a.episodeQueueIndex <> invalid then
+        if a.episodeQueueIndex + 1 < a.episodeQueue.Count() then hasNextEp = true
     end if
+
+    ' Outros only make sense as a "Play Next Episode" prompt - drop
+    ' them on movies and on TV finales so the banner doesn't lie to
+    ' the user about an action it can't perform.
+    if kind = "outro" and (not isTv or not hasNextEp) then
+        clearActiveChapter()
+        return
+    end if
+
+    ' Brand-new chapter window. Tear down any leftover state from a
+    ' previous chapter, then bring the banner up fresh.
+    m.skipBannerTimer.control = "stop"
+    m.skipFadeAnim.control = "stop"
+    m.skipCountdownAnim.control = "stop"
+
+    m.activeChapter = hit
+    m.activeChapterKind = kind
+    m.bannerDismissed = false
+    m.skipLabel.text = chapterActionLabel(kind)
+    m.skipBanner.opacity = 1.0
     m.skipBanner.visible = true
+
+    if kind = "outro" then
+        m.activeChapterIsCountdown = true
+        m.skipCountdownFill.width = 0
+        m.skipCountdown.visible = true
+        m.skipCountdownAnim.control = "start"
+        m.skipBannerTimer.control = "start"
+    else
+        m.activeChapterIsCountdown = false
+        m.skipCountdown.visible = false
+        m.skipCountdownFill.width = 0
+        m.skipBannerTimer.control = "start"
+    end if
+
+    ' If the user happens to be in the overlay when a chapter window
+    ' opens, surface the skip option in the action bar immediately.
+    if m.overlay.visible then rebuildActionBar()
+end sub
+
+' Tear down all skip-banner state. Cancels the 5s timer and any
+' running fade / countdown animations, hides the banner, and clears
+' the active-chapter pointer. Called when the playhead leaves a
+' chapter window, when a new chapter takes over, when args reload
+' (episode advance), and when performSkip seeks past the window.
+sub clearActiveChapter()
+    wasInChapter = (m.activeChapter <> invalid)
+    m.activeChapter = invalid
+    m.activeChapterKind = ""
+    m.activeChapterIsCountdown = false
+    m.bannerDismissed = false
+    if m.skipBanner <> invalid then
+        m.skipBanner.visible = false
+        m.skipBanner.opacity = 1.0
+    end if
+    if m.skipCountdown <> invalid then m.skipCountdown.visible = false
+    if m.skipCountdownFill <> invalid then m.skipCountdownFill.width = 0
+    if m.skipBannerTimer <> invalid then m.skipBannerTimer.control = "stop"
+    if m.skipFadeAnim <> invalid then m.skipFadeAnim.control = "stop"
+    if m.skipCountdownAnim <> invalid then m.skipCountdownAnim.control = "stop"
+    ' If the action bar was showing a skip entry, drop it now.
+    if wasInChapter and m.overlay <> invalid and m.overlay.visible then
+        rebuildActionBar()
+    end if
+end sub
+
+' 5s timer fired. For outros we auto-advance to the next episode;
+' for intros / recaps we kick off the 0.5s opacity fade and remember
+' that the banner has been dismissed so we don't redraw on a stray
+' position tick.
+sub onSkipBannerTimerFire()
+    if m.activeChapter = invalid then return
+    if m.activeChapterIsCountdown then
+        performSkip()
+    else
+        m.bannerDismissed = true
+        m.skipFadeAnim.control = "start"
+    end if
+end sub
+
+' Map a chapter kind to the label text shown both on the floating
+' banner and on the action bar entry. Empty string means "don't
+' surface a button at all" - used for unrecognized kinds.
+function chapterActionLabel(kind as String) as String
+    if kind = "outro" then return "Play Next Episode"
+    if kind = "recap" then return "Skip Recap"
+    if kind = "intro" then return "Skip Intro"
+    return "Skip Intro"
+end function
+
+' Rebuild the action bar's button list, optionally prepending a skip
+' entry when the playhead is currently in a chapter window. Called
+' on init, every time the overlay opens, and whenever the active
+' chapter changes while the overlay is already up.
+sub rebuildActionBar()
+    if m.actionBar = invalid or m.baseActionLabels = invalid then return
+    prevLabels = m.actionBar.buttons
+    prevFocused = m.actionBar.buttonFocused
+    prevLabel = ""
+    if prevLabels <> invalid and prevFocused <> invalid and prevFocused >= 0 and prevFocused < prevLabels.Count() then
+        prevLabel = prevLabels[prevFocused]
+    end if
+
+    labels = []
+    if m.activeChapter <> invalid then
+        skipLabel = chapterActionLabel(m.activeChapterKind)
+        if skipLabel <> "" then labels.Push(skipLabel)
+    end if
+    for each l in m.baseActionLabels
+        labels.Push(l)
+    end for
+    m.actionBar.buttons = labels
+
+    ' Re-anchor focus on the same label if it survived the rebuild,
+    ' otherwise let ButtonGroup default to index 0.
+    if prevLabel <> "" then
+        for i = 0 to labels.Count() - 1
+            if labels[i] = prevLabel then
+                m.actionBar.focusButton = i
+                exit for
+            end if
+        end for
+    end if
 end sub
 
 ' Perform the skip the banner advertised. For TV outros we try to
@@ -342,7 +718,7 @@ end sub
 sub performSkip()
     ch = m.activeChapter
     if ch = invalid then return
-    target = W_AsInt(ch.end)
+    target = W_AsInt(ch["end"])
     a = m.top.args
     isTvOutro = false
     if ch.kind <> invalid and ch.kind = "outro" then
@@ -350,8 +726,7 @@ sub performSkip()
             isTvOutro = true
         end if
     end if
-    m.activeChapter = invalid
-    m.skipBanner.visible = false
+    clearActiveChapter()
     if isTvOutro then
         ' Mark current episode finished and jump to the next one.
         saveProgress(true)
@@ -388,16 +763,22 @@ sub saveProgress(forceFinished as Boolean)
     if a.tmdb <> invalid then tmdb = a.tmdb
     ' Stash a tile-friendly snapshot once per playback session so the
     ' Continue Watching row can render without re-fetching details.
+    ' mirrorHost/Link/Name come from MirrorPicker so the ResumePicker
+    ' can offer "Resume on <host>" without re-fetching servers.
     itemKey = W_ItemKey(imdb, href)
     if itemKey <> "" then
-        W_RememberContext(itemKey, {
+        ctx = {
             title:  title
             poster: poster
             href:   href
             imdb:   imdb
             tmdb:   tmdb
             kind:   kind
-        })
+        }
+        if a.mirrorHost <> invalid and a.mirrorHost <> "" then ctx.mirrorHost = a.mirrorHost
+        if a.mirrorLink <> invalid and a.mirrorLink <> "" then ctx.mirrorLink = a.mirrorLink
+        if a.mirrorName <> invalid and a.mirrorName <> "" then ctx.mirrorName = a.mirrorName
+        W_RememberContext(itemKey, ctx)
     end if
     if kind = "tv" and a.episode <> invalid then
         slug = ""
@@ -450,10 +831,20 @@ end sub
 sub showOverlay()
     m.overlayBg.visible = true
     m.overlay.visible = true
+    ' Refresh the action-bar button list so a Skip Intro / Play Next
+    ' Episode entry is present whenever the playhead is in a chapter
+    ' window. This is what surfaces the skip option after the
+    ' floating banner has faded out.
+    rebuildActionBar()
     ' Banner would peek through the translucent overlay backdrop and
-    ' look broken; hide it while the overlay is up. updateSkipBanner
-    ' on the next position tick will bring it back if still relevant.
+    ' look broken; hide it while the overlay is up. We also stop the
+    ' 5s timer and animations so they don't fire underneath the
+    ' overlay - the chapter is still active (m.activeChapter stays
+    ' set), the user just isn't going to see the floating prompt.
     m.skipBanner.visible = false
+    m.skipBannerTimer.control = "stop"
+    m.skipFadeAnim.control = "stop"
+    m.skipCountdownAnim.control = "stop"
     m.actionBar.setFocus(true)
     m.openPanel = ""
 end sub
@@ -467,26 +858,37 @@ sub hideOverlay()
     m.audioPanel.visible = false
     m.openPanel = ""
     m.video.setFocus(true)
-    ' Re-evaluate the banner now (in case the playhead is still inside
-    ' a chapter window the user dismissed the overlay through).
-    m.activeChapter = invalid
-    updateSkipBanner(W_AsInt(m.video.position))
+    ' Don't auto-resurrect the banner here. If the user dismissed the
+    ' overlay while in a chapter window the action bar already had
+    ' the skip option; respawning a floating banner on every overlay
+    ' close would feel like nagging. The next time the playhead
+    ' enters a *new* chapter window updateSkipBanner will fire fresh.
 end sub
 
 sub onActionBar()
     idx = m.actionBar.buttonSelected
     if idx = invalid then return
-    if idx = 0 then
+    btns = m.actionBar.buttons
+    if btns = invalid or idx < 0 or idx >= btns.Count() then return
+    label = btns[idx]
+    ' Skip-style entries only appear while a chapter is active; clicking
+    ' them performs the same action as OK on the floating banner.
+    if label = "Skip Intro" or label = "Skip Recap" or label = "Play Next Episode" then
+        hideOverlay()
+        performSkip()
+        return
+    end if
+    if label = "Resume" then
         onResume()
-    else if idx = 1 then
+    else if label = "Quality" then
         openPanel("quality")
-    else if idx = 2 then
+    else if label = "Subtitles" then
         openPanel("cc")
-    else if idx = 3 then
+    else if label = "CC Settings" then
         openPanel("ccStyle")
-    else if idx = 4 then
+    else if label = "Audio" then
         openPanel("audio")
-    else if idx = 5 then
+    else if label = "Stop" then
         onStop()
     end if
 end sub
@@ -661,6 +1063,50 @@ end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
+    ' Advance overlay swallows all input until it succeeds, the user
+    ' BACKs out, or one of its subtasks fails. OK during a failure
+    ' message dismisses the overlay so the user can continue.
+    if m.advanceOverlay <> invalid and m.advanceOverlay.visible then
+        if key = "back" then
+            cancelAdvance()
+            saveProgress(false)
+            m.video.control = "stop"
+            m.top.requestNav = { action: "back" }
+            return true
+        end if
+        if key = "OK" and m.advance = invalid then
+            ' We got here on a failure (advance state torn down already);
+            ' OK leaves the player so the user can pick another mirror /
+            ' episode manually.
+            m.advanceOverlay.visible = false
+            saveProgress(false)
+            m.video.control = "stop"
+            m.top.requestNav = { action: "back" }
+            return true
+        end if
+        return true
+    end if
+    ' Outro countdown: BACK lets the user finish the credits (cancels
+    ' the auto-advance, hides the banner, but keeps the chapter
+    ' active so the action-bar entry still works); OK advances
+    ' immediately. Both bypass the regular OK / BACK paths.
+    if m.activeChapterIsCountdown and not m.overlay.visible then
+        if key = "back" then
+            m.skipBanner.visible = false
+            m.skipBanner.opacity = 1.0
+            m.skipCountdown.visible = false
+            m.skipBannerTimer.control = "stop"
+            m.skipFadeAnim.control = "stop"
+            m.skipCountdownAnim.control = "stop"
+            m.activeChapterIsCountdown = false
+            m.bannerDismissed = true
+            return true
+        end if
+        if key = "OK" then
+            performSkip()
+            return true
+        end if
+    end if
     if key = "OK" or key = "options" then
         ' If the resolver gave us a chapter window and we're inside it,
         ' OK fires the skip instead of opening the overlay. Banner is
@@ -722,19 +1168,23 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     if key = "down" then
         if m.overlay.visible and m.actionBar.hasFocus() then
             fi = m.actionBar.buttonFocused
+            btns = m.actionBar.buttons
             if fi = invalid then fi = 0
-            if fi = 1 then
-                openPanel("quality")
-                return true
-            else if fi = 2 then
-                openPanel("cc")
-                return true
-            else if fi = 3 then
-                openPanel("ccStyle")
-                return true
-            else if fi = 4 then
-                openPanel("audio")
-                return true
+            if btns <> invalid and fi >= 0 and fi < btns.Count() then
+                label = btns[fi]
+                if label = "Quality" then
+                    openPanel("quality")
+                    return true
+                else if label = "Subtitles" then
+                    openPanel("cc")
+                    return true
+                else if label = "CC Settings" then
+                    openPanel("ccStyle")
+                    return true
+                else if label = "Audio" then
+                    openPanel("audio")
+                    return true
+                end if
             end if
         end if
         if not m.overlay.visible then

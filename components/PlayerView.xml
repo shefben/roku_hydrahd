@@ -9,35 +9,79 @@
     <script type="text/brightscript" uri="pkg:/components/PlayerView.brs" />
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
     <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Sync.brs" />
 
     <children>
         <Video id="video" width="1920" height="1080" enableUI="true" enableTrickPlay="true" />
 
         <Rectangle id="overlayBg" width="1920" height="1080" color="0x000000aa" visible="false" />
 
-        <!-- Skip Intro / Skip Credits banner. Only appears when the
-             resolver returned chapter data for the current mirror and
-             the playhead is inside one of those windows. -->
-        <Group id="skipBanner" translation="[1430, 900]" visible="false">
-            <Rectangle id="skipBg" width="450" height="64" color="0x000000d4" />
-            <Rectangle id="skipBorder" width="450" height="64" color="0x00000000" />
-            <Label id="skipLabel" translation="[20, 20]" width="410" height="24" text=""
-                   font="font:MediumBoldSystemFont" color="0xffd24aff"
+        <!-- Netflix-style skip prompt at the bottom-right corner of the
+             1920x1080 frame: ~80px in from each edge. Two visual modes:
+             intro/recap show "Skip Intro"/"Skip Recap" and fade after
+             5 seconds; outros (TV episodes only, and only when the
+             queue has another episode after the current one) show
+             "Play Next Episode" with a 5-second progress bar that
+             auto-advances unless the user presses BACK or OK. -->
+        <Group id="skipBanner" translation="[1500, 936]" visible="false" opacity="1.0">
+            <!-- Layered rectangles fake a 2px white outline since
+                 Roku's Rectangle has no native stroke property. -->
+            <Rectangle width="340" height="64" color="0xffffffff" opacity="0.85" />
+            <Rectangle translation="[2, 2]" width="336" height="60" color="0x141414f0" />
+            <Label id="skipLabel" translation="[20, 12]" width="300" height="36" text=""
+                   font="font:MediumBoldSystemFont" color="0xffffffff"
                    horizAlign="center" vertAlign="center" />
+            <!-- Outro countdown bar. Hidden for intro/recap. -->
+            <Group id="skipCountdown" translation="[20, 54]" visible="false">
+                <Rectangle width="300" height="4" color="0x66666688" />
+                <Rectangle id="skipCountdownFill" width="0" height="4" color="0xe50914ff" />
+            </Group>
+        </Group>
+
+        <!-- Drives banner state. 5 seconds for intro/recap (then we
+             trigger the fade animation) and for outros (then we
+             auto-advance to the next episode). -->
+        <Timer id="skipBannerTimer" duration="5.0" repeat="false" />
+
+        <!-- 0.5s opacity fade-out for intro/recap banners. -->
+        <Animation id="skipFadeAnim" duration="0.5" easeFunction="outQuad" repeat="false">
+            <FloatFieldInterpolator
+                key="[0.0, 1.0]"
+                keyValue="[1.0, 0.0]"
+                fieldToInterp="skipBanner.opacity" />
+        </Animation>
+
+        <!-- 5s linear fill (0 -> 300px) for the outro countdown bar. -->
+        <Animation id="skipCountdownAnim" duration="5.0" easeFunction="linear" repeat="false">
+            <FloatFieldInterpolator
+                key="[0.0, 1.0]"
+                keyValue="[0.0, 300.0]"
+                fieldToInterp="skipCountdownFill.width" />
+        </Animation>
+
+        <!-- "Loading next episode..." overlay used during in-place
+             episode advance. Stays inside PlayerView so the user
+             never bounces back to MirrorPicker. -->
+        <Group id="advanceOverlay" translation="[600, 460]" visible="false">
+            <Rectangle width="720" height="160" color="0x000000ee" />
+            <Rectangle translation="[2, 2]" width="716" height="156" color="0x141414ff" />
+            <Label id="advanceTitle" translation="[40, 36]" width="640" height="32" text="Loading next episode..."
+                   font="font:MediumBoldSystemFont" color="0xffffffff" horizAlign="center" />
+            <Label id="advanceStatus" translation="[40, 86]" width="640" height="28" text=""
+                   font="font:SmallSystemFont" color="0xffd24aff" horizAlign="center" />
         </Group>
 
         <LayoutGroup id="overlay" translation="[120, 120]" layoutDirection="vert" itemSpacings="[18]" visible="false">
             <Label id="title" text="" font="font:LargeBoldSystemFont" color="0xffffffff" width="1680" maxLines="1" />
             <Label id="subtitle" text="" font="font:MediumSystemFont" color="0xc8c8c8ff" width="1680" maxLines="1" />
 
-            <ButtonGroup id="actionBar" layoutDirection="horiz" itemSpacings="[20]" minWidth="1680">
-                <Button id="resumeBtn" text="Resume" minWidth="180" />
-                <Button id="qualityBtn" text="Quality" minWidth="180" />
-                <Button id="ccBtn" text="Subtitles" minWidth="180" />
-                <Button id="ccStyleBtn" text="CC Settings" minWidth="220" />
-                <Button id="audioBtn" text="Audio" minWidth="180" />
-                <Button id="stopBtn" text="Stop" minWidth="160" />
-            </ButtonGroup>
+            <!-- Buttons populated dynamically in PlayerView.brs so we
+                 can prepend a Skip Intro / Skip Recap / Play Next
+                 Episode entry while the playhead is inside a chapter
+                 window. See rebuildActionBar(). minWidth here is the
+                 per-button minimum (ButtonGroup convention) - long
+                 labels like "Play Next Episode" expand past it. -->
+            <ButtonGroup id="actionBar" layoutDirection="horiz" itemSpacings="[20]" minWidth="200" />
 
             <Label id="status" text="" font="font:SmallSystemFont" color="0xffd24aff" width="1680" maxLines="2" />
 

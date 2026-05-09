@@ -1,6 +1,14 @@
 ' MainScene.brs - Top-level chrome + view router.
 
 sub init()
+    ' Rehydrate registry from the resolver before any view reads it. A
+    ' fresh sideload after "Delete + Install" starts with an empty
+    ' registry; pulling here means HomeView's Continue Watching row,
+    ' FavoritesView, and search history all see prior state on first
+    ' render. Pull is capped at 5s so an offline resolver can't block
+    ' boot indefinitely.
+    S_PullOnBoot()
+
     m.contentHost = m.top.findNode("contentHost")
     m.topBar = m.top.findNode("topBar")
     m.hint = m.top.findNode("hint")

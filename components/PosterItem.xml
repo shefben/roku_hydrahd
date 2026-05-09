@@ -7,6 +7,7 @@
         <field id="height" type="float" value="370" />
     </interface>
     <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Sync.brs" />
     <script type="text/brightscript">
         <![CDATA[
         sub init()

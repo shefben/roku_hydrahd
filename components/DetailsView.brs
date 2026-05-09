@@ -121,9 +121,11 @@ sub onDetailResult()
     end if
     m.detail = res.detail
     paintDetail()
-    ' Continue Watching tiles set autoResume=true so the user goes
-    ' straight into playback. We hand off via onPlay() once paintDetail
-    ' has filled in seriesResume / movieProgress.
+    ' Callers can opt into a straight-to-playback fast path by passing
+    ' autoResume=true in args. The Continue Watching tile flow used to
+    ' rely on this; it now routes through ResumePicker so the user can
+    ' pick mirror/episode first. Kept here for any future deep-link
+    ' or auto-launch hook that wants the original behavior.
     a = m.top.args
     if a <> invalid and a.autoResume = true then
         a.autoResume = false
@@ -227,8 +229,17 @@ sub toggleFavorite()
     end if
     btns = m.actions.buttons
     if btns <> invalid and btns.Count() > 0 then
-        btns[btns.Count() - 1] = favButtonLabel()
+        lastIdx = btns.Count() - 1
+        btns[lastIdx] = favButtonLabel()
         m.actions.buttons = btns
+        ' Reassigning `buttons` tears down the existing Button child
+        ' nodes and rebuilds them, so focus on the old Save Button is
+        ' lost - the action bar then eats every remote press because
+        ' ButtonGroup is in the focus chain with no focused Button.
+        ' setFocus + focusButton re-anchors focus on the newly built
+        ' Save / Saved button so the user can keep navigating.
+        m.actions.setFocus(true)
+        m.actions.focusButton = lastIdx
     end if
 end sub
 

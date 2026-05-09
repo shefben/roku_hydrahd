@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="SyncTask" extends="Task">
+    <interface>
+        <field id="mode" type="string" />
+        <field id="resolverUrl" type="string" />
+        <field id="did" type="string" />
+        <field id="payload" type="string" />
+        <field id="result" type="assocarray" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/tasks/SyncTask.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+</component>
