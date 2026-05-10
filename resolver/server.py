@@ -754,6 +754,126 @@ def imdb_from_refer(url: str, kind: str = "") -> str:
     return found
 
 
+# --- OpenSubtitles + wyzie subtitle fallback ------------------------
+#
+# Some providers (notably airflix1 / brightpathsignals / vaplayer.ru)
+# ship stream URLs without inline subtitle tracks - their browser
+# player loads subs client-side from rest.opensubtitles.org and
+# converts them to VTT through sub.wyzie.io. Without that the Roku
+# channel's Subtitles dropdown shows nothing for those mirrors even
+# though every other mirror offers English. Mirror the player's logic
+# server-side: hit OpenSubtitles for the IMDB id, take the first hit
+# per language, and rewrite each .gz download link to a wyzie.io VTT
+# URL the Roku Video node can play directly.
+#
+# Cached in-process so a 4-mirror auto-cascade for the same episode
+# only triggers one OpenSubtitles fetch.
+
+_OS_TIMEOUT = 6.0
+_OS_CACHE_TTL = 1800.0
+_OS_CACHE_MAX = 256
+_OS_CACHE: "OrderedDict[str, tuple[float, list[dict[str, Any]]]]" = OrderedDict()
+_OS_CACHE_LOCK = threading.Lock()
+_OS_VRF_RE = re.compile(r"/vrf-([a-f0-9]+)/filead/(\d+)", re.IGNORECASE)
+
+
+def _opensubtitles_cache_get(key: str) -> list[dict[str, Any]] | None:
+    with _OS_CACHE_LOCK:
+        ent = _OS_CACHE.get(key)
+        if not ent:
+            return None
+        ts, val = ent
+        if time.time() - ts > _OS_CACHE_TTL:
+            _OS_CACHE.pop(key, None)
+            return None
+        _OS_CACHE.move_to_end(key)
+        return list(val)
+
+
+def _opensubtitles_cache_put(key: str, val: list[dict[str, Any]]) -> None:
+    with _OS_CACHE_LOCK:
+        _OS_CACHE[key] = (time.time(), list(val))
+        _OS_CACHE.move_to_end(key)
+        while len(_OS_CACHE) > _OS_CACHE_MAX:
+            _OS_CACHE.popitem(last=False)
+
+
+def opensubtitles_search(imdb_id: str, kind: str = "",
+                         season: int = 0, episode: int = 0
+                         ) -> list[dict[str, Any]]:
+    """Fetch one subtitle track per language from OpenSubtitles.
+    Returns Roku-shaped {url, language, name} dicts pointing at
+    wyzie.io VTT URLs. Empty list if the IMDB id is missing, the
+    request fails, or no SubDownloadLink can be parsed."""
+    if not imdb_id or not imdb_id.startswith("tt"):
+        return []
+    bare = imdb_id[2:]
+    cache_key = f"{bare}|{kind}|{season}|{episode}"
+    cached = _opensubtitles_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    if kind == "tv" and season > 0 and episode > 0:
+        url = (f"https://rest.opensubtitles.org/search/episode-{episode}"
+               f"/imdbid-{bare}/season-{season}")
+    else:
+        url = f"https://rest.opensubtitles.org/search/imdbid-{bare}"
+
+    out: list[dict[str, Any]] = []
+    try:
+        # rest.opensubtitles.org rejects requests without their custom
+        # X-User-Agent header (any non-empty value works for read-only
+        # search). Plain urlopen — no cookie jar plumbing needed.
+        req = Request(url, headers={
+            "User-Agent": UA,
+            "X-User-Agent": "trailers.to-UA",
+            "Accept": "application/json",
+        })
+        with urlopen(req, timeout=_OS_TIMEOUT) as resp:
+            if resp.status != 200:
+                LOG.info("opensubtitles %s -> HTTP %s", cache_key, resp.status)
+                _opensubtitles_cache_put(cache_key, out)
+                return out
+            payload = json.loads(resp.read().decode("utf-8", "replace"))
+    except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
+        LOG.info("opensubtitles fetch failed for %s: %s", cache_key, exc)
+        _opensubtitles_cache_put(cache_key, out)
+        return out
+
+    if not isinstance(payload, list):
+        _opensubtitles_cache_put(cache_key, out)
+        return out
+
+    seen_langs: set[str] = set()
+    for entry in payload:
+        if not isinstance(entry, dict):
+            continue
+        lang_id3 = (entry.get("SubLanguageID") or "").lower()
+        if not lang_id3 or lang_id3 in seen_langs:
+            continue
+        download_link = entry.get("SubDownloadLink") or ""
+        m = _OS_VRF_RE.search(download_link)
+        if not m:
+            continue
+        vrf, sub_id = m.group(1), m.group(2)
+        wyzie_url = (f"https://sub.wyzie.io/c/{vrf}/id/{sub_id}"
+                     f"?format=vtt&encoding=UTF-8")
+        iso2 = (entry.get("ISO639") or "").lower() or lang_id3[:2]
+        out.append({
+            "url": wyzie_url,
+            "language": iso2,
+            "name": entry.get("LanguageName") or lang_id3.upper(),
+        })
+        seen_langs.add(lang_id3)
+
+    LOG.info("opensubtitles %s -> %d langs (%s)",
+             cache_key, len(out),
+             ",".join(s["language"] for s in out[:6]) +
+             ("..." if len(out) > 6 else ""))
+    _opensubtitles_cache_put(cache_key, out)
+    return out
+
+
 def merge_chapters(primary: list[dict[str, Any]],
                    secondary: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Combine two chapter lists, keeping the primary entry's window
@@ -1699,8 +1819,14 @@ def resolve_airflix(embed_url: str, refer: str) -> dict[str, Any] | None:
     if not streams:
         return None
 
+    # vaplayer.ru's envelope shape places `default_subs` at the top
+    # level alongside `status_code` and `data` (not inside `data`).
+    # Fall back to data-level just in case some titles ship it there.
+    default_subs_raw = envelope.get("default_subs")
+    if not default_subs_raw:
+        default_subs_raw = payload.get("default_subs")
     subs: list[dict[str, Any]] = []
-    for s in payload.get("default_subs") or []:
+    for s in default_subs_raw or []:
         if not isinstance(s, dict):
             continue
         url = s.get("url") or s.get("file")
@@ -2458,6 +2584,26 @@ class Handler(BaseHTTPRequestHandler):
                 )
         except Exception as exc:  # noqa: BLE001
             LOG.info("introdb merge failed for %s: %s", embed, exc)
+
+        # If the resolver couldn't extract any inline subtitle tracks
+        # (airflix1 / brightpathsignals / vaplayer.ru in particular -
+        # their browser player loads subs client-side from
+        # rest.opensubtitles.org), fall back to OpenSubtitles ourselves
+        # so the channel's Subtitles dropdown isn't empty. Reuses the
+        # imdb_id resolved above for IntroDB - including the
+        # imdb_from_refer fallback - so a TMDB-only embed URL still
+        # gets subtitles after the slug-based IMDB lookup succeeds.
+        try:
+            existing_subs = result.get("subtitles") or []
+            if not existing_subs and imdb_id:
+                os_subs = opensubtitles_search(
+                    imdb_id, params.get("kind", ""),
+                    season_int, episode_int,
+                )
+                if os_subs:
+                    result["subtitles"] = os_subs
+        except Exception as exc:  # noqa: BLE001
+            LOG.info("opensubtitles fallback failed for %s: %s", embed, exc)
 
         # Wrap the upstream stream/subtitle URLs in /stream so the
         # resolver's IP + headers are what actually reaches the CDN.
