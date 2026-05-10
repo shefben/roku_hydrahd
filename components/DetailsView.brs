@@ -291,7 +291,19 @@ function computeSeriesResume() as Object
     episode = W_AsInt(sp.episode)
     target = findEpisodeByNum(season, episode)
     if target = invalid then return invalid
-    if W_AsBool(sp.done) then
+
+    ' Watchlist now sets sp.done only when the user has actually
+    ' finished the show (last episode of last season). For the more
+    ' common case where they just finished one episode, sp.done stays
+    ' false but the per-episode record's `done` is true - we still
+    ' want to advance the resume target to the next episode in that
+    ' case so the "Continue Watching" tile points at S1E6 after they
+    ' finished S1E5, instead of re-offering the just-finished episode.
+    epEntry = W_GetEpisodeProgress(m.detail.imdb, m.detail.href, season, episode)
+    epDone = false
+    if epEntry <> invalid then epDone = W_AsBool(epEntry.done)
+
+    if W_AsBool(sp.done) or epDone then
         nextT = findNextEpisode(season, episode)
         if nextT <> invalid then
             nextT.resumePos = 0
@@ -301,7 +313,6 @@ function computeSeriesResume() as Object
         target.resumePos = 0
         return target
     end if
-    epEntry = W_GetEpisodeProgress(m.detail.imdb, m.detail.href, season, episode)
     target.resumePos = W_ResumePosition(epEntry)
     return target
 end function

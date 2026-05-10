@@ -12,7 +12,7 @@
     <children>
         <Label translation="[60, 10]" text="Settings" font="font:LargeBoldSystemFont" color="0xffffffff" />
 
-        <LayoutGroup translation="[60, 80]" layoutDirection="vert" itemSpacings="[28]">
+        <LayoutGroup id="layoutGroup" translation="[60, 80]" layoutDirection="vert" itemSpacings="[28]">
             <Group>
                 <Label text="Base URL" font="font:MediumBoldSystemFont" color="0xffffffff" />
                 <Label id="baseUrlValue" translation="[0, 30]" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" width="1500" />

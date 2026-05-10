@@ -55,7 +55,7 @@ function R_ResolveEmbed(args as Object) as Object
     end if
 
     if out <> invalid and out.url <> invalid and out.url <> "" then
-        out = R_EnrichResult(out, refer, session)
+        out = R_EnrichResult(out, args, refer, session)
     end if
 
     HC_Close(session)
@@ -68,13 +68,15 @@ end function
 ' --- Result enrichment ----------------------------------------------
 '
 ' After a provider returns a stream URL, top up the result with anything
-' the provider didn't fill in itself: HLS quality variants by parsing the
-' master playlist, skip-intro/outro/recap chapters from #EXT-X-DATERANGE
-' entries, and any extra .vtt / .srt URLs we can scrape from a saved
-' page body. Idempotent - if a provider already populated qualities or
-' chapters or subs we keep what they returned and only fill the gaps.
+' the provider didn't fill in itself:
+'   * HLS quality variants by parsing the master playlist
+'   * Skip-intro / outro / recap chapters from #EXT-X-DATERANGE entries
+'     in the playlist, then from the AniSkip API (free, anime-only) if
+'     the stream had nothing
+'   * Free subtitles from sub.wyzie.io if the provider returned none
+' Idempotent - if a provider already populated a field we keep theirs.
 
-function R_EnrichResult(raw as Object, refer as String, session as Object) as Object
+function R_EnrichResult(raw as Object, args as Object, refer as String, session as Object) as Object
     if raw = invalid or raw.url = invalid or raw.url = "" then return raw
     streamUrl = raw.url
     isHls = U_LooksHls(streamUrl)
@@ -83,6 +85,19 @@ function R_EnrichResult(raw as Object, refer as String, session as Object) as Ob
     if raw.referer <> invalid and raw.referer <> "" then refUrl = raw.referer
     if refUrl = "" then refUrl = refer
     if refUrl = "" then refUrl = streamUrl
+
+    imdb = ""
+    tmdb = ""
+    kind = ""
+    season = 0
+    episode = 0
+    if args <> invalid then
+        if args.imdb <> invalid then imdb = args.imdb
+        if args.tmdb <> invalid then tmdb = args.tmdb
+        if args.kind <> invalid then kind = args.kind
+        if args.season <> invalid then season = args.season
+        if args.episode <> invalid then episode = args.episode
+    end if
 
     if isHls then
         existingQualities = invalid
@@ -96,6 +111,20 @@ function R_EnrichResult(raw as Object, refer as String, session as Object) as Ob
         if existingChapters = invalid or existingChapters.Count() = 0 then
             raw.chapters = HM_ExtractChaptersHls(streamUrl, refUrl, session)
         end if
+    end if
+
+    ' Free skip-intro / outro lookup from AniSkip if the upstream had no
+    ' DATERANGE markers. AniSkip is anime-only - non-anime content will
+    ' return an empty result quickly via the Jikan / AniList lookups.
+    if raw.chapters = invalid or type(raw.chapters) <> "roArray" or raw.chapters.Count() = 0 then
+        raw.chapters = HM_FetchSkipTimes(imdb, tmdb, kind, season, episode, session)
+    end if
+
+    ' Free subtitle library top-up. Most providers return what their
+    ' upstream advertised; fall back to wyzie.io's aggregated index
+    ' when we got nothing.
+    if raw.subtitles = invalid or type(raw.subtitles) <> "roArray" or raw.subtitles.Count() = 0 then
+        raw.subtitles = HM_FetchFreeSubs(imdb, tmdb, kind, season, episode, session)
     end if
 
     return raw

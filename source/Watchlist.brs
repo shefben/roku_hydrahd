@@ -99,27 +99,57 @@ function W_GetEpisodeProgress(imdb as String, href as String, season as Integer,
     return W_Read("e:" + W_ItemKey(imdb, href) + ":" + season.ToStr() + ":" + episode.ToStr())
 end function
 
-sub W_SaveEpisodeProgress(imdb as String, href as String, season as Integer, episode as Integer, posSec as Integer, dur as Integer, slug as String, name as String)
+' Save per-episode progress AND the series-level "where the user is"
+' record. The series record's `done` is true ONLY when the show has
+' actually been finished - i.e. the current episode is finished AND
+' it's the last episode of the last season. Otherwise the series
+' stays in Continue Watching even after a finished episode (the user
+' has more to watch).
+'
+' lastSeason / lastEpisode are the show's final season number and
+' the final episode number within that season. Pass 0 if unknown -
+' in that case we preserve whatever the previous s: record stored
+' (so a partial save through ResumePicker doesn't clobber the value
+' a fuller DetailsView save populated earlier) and conservatively
+' default to "not the final episode" if no prior value exists.
+sub W_SaveEpisodeProgress(imdb as String, href as String, season as Integer, episode as Integer, posSec as Integer, dur as Integer, slug as String, name as String, lastSeason as Integer, lastEpisode as Integer)
     k = W_ItemKey(imdb, href)
     if k = "" then return
     if posSec < 0 then posSec = 0
-    done = W_IsFinished(posSec, dur)
+    epDone = W_IsFinished(posSec, dur)
     ts = CreateObject("roDateTime").AsSeconds()
     W_Write("e:" + k + ":" + season.ToStr() + ":" + episode.ToStr(), {
         pos:  posSec
         dur:  dur
-        done: done
+        done: epDone
         ts:   ts
     })
+
+    ' Carry forward last-known final-episode bounds when the caller
+    ' didn't supply them (ResumePicker -> MirrorPicker path doesn't
+    ' have episodeQueue context, but the previous DetailsView save did).
+    prev = W_Read("s:" + k)
+    if lastSeason <= 0 and prev <> invalid and prev.lastSeason <> invalid then lastSeason = W_AsInt(prev.lastSeason)
+    if lastEpisode <= 0 and prev <> invalid and prev.lastEpisode <> invalid then lastEpisode = W_AsInt(prev.lastEpisode)
+
+    seriesDone = false
+    if epDone and lastSeason > 0 and lastEpisode > 0 then
+        if season > lastSeason or (season = lastSeason and episode >= lastEpisode) then
+            seriesDone = true
+        end if
+    end if
+
     W_Write("s:" + k, {
-        season:  season
-        episode: episode
-        slug:    slug
-        name:    name
-        pos:     posSec
-        dur:     dur
-        done:    done
-        ts:      ts
+        season:      season
+        episode:     episode
+        slug:        slug
+        name:        name
+        pos:         posSec
+        dur:         dur
+        done:        seriesDone
+        lastSeason:  lastSeason
+        lastEpisode: lastEpisode
+        ts:          ts
     })
 end sub
 
