@@ -251,6 +251,91 @@ function HM_ExtractChaptersHls(streamUrl as String, refer as String, session as 
     return out
 end function
 
+' --- HLS-embedded subtitle parsing -----------------------------------
+'
+' Master playlists may declare per-language subtitle renditions via
+'   #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=...,NAME="English",
+'                  LANGUAGE="en",URI="<url>"
+' Roku's Video node does NOT auto-promote these to the subtitleTracks
+' field, so we parse them out here and feed them via TrackName like
+' sidecar VTT files. URI may point either at a direct .vtt or at a
+' subtitle sub-playlist (.m3u8 carrying one or more .vtt segments) —
+' HM_ResolveSubPlaylist follows the sub-playlist case and returns the
+' first .vtt segment URL Roku can consume.
+
+function HM_ExtractSubsHls(streamUrl as String, refer as String, session as Object) as Object
+    out = []
+    if streamUrl = invalid or streamUrl = "" then return out
+    if Instr(1, LCase(streamUrl), ".m3u8") = 0 then return out
+
+    headers = {}
+    if refer <> "" then headers["Referer"] = refer
+    res = HC_Get(session, streamUrl, headers, 6000)
+    if res = invalid or res.body = "" then return out
+    text = res.body
+    if Instr(1, text, "TYPE=SUBTITLES") = 0 then return out
+
+    lines = text.Tokenize(chr(10))
+    if lines = invalid then return out
+
+    seen = {}
+    for i = 0 to lines.Count() - 1
+        line = U_Trim(lines[i])
+        if Left(line, 12) <> "#EXT-X-MEDIA" then continue for
+        if Instr(1, line, "TYPE=SUBTITLES") = 0 then continue for
+
+        attrs = HM_ParseAttrs(line)
+        uri = ""
+        if attrs.URI <> invalid then uri = attrs.URI
+        if uri = "" then continue for
+
+        absUri = RP_AbsUrl(uri, streamUrl)
+        finalUrl = HM_ResolveSubPlaylist(absUri, refer, session)
+        if finalUrl = "" then continue for
+
+        lang = "en"
+        if attrs.LANGUAGE <> invalid then lang = LCase(attrs.LANGUAGE)
+        nameStr = ""
+        if attrs.NAME <> invalid then nameStr = attrs.NAME
+        if nameStr = "" then nameStr = UCase(lang)
+
+        if seen.DoesExist(finalUrl) then continue for
+        seen[finalUrl] = true
+        out.Push({
+            url: finalUrl
+            language: lang
+            name: nameStr
+        })
+    end for
+    return out
+end function
+
+' Given a URI from #EXT-X-MEDIA, return a URL Roku can consume directly.
+' Direct .vtt / .srt URIs pass through unchanged. .m3u8 sub-playlists are
+' fetched and the first non-comment line (the segment URL) is returned —
+' for the typical "single-VTT-as-segment" case this gives Roku a playable
+' VTT URL even though it was nested behind an HLS sub-playlist.
+function HM_ResolveSubPlaylist(uri as String, refer as String, session as Object) as String
+    if uri = invalid or uri = "" then return ""
+    lc = LCase(uri)
+    if Instr(1, lc, ".vtt") > 0 then return uri
+    if Instr(1, lc, ".srt") > 0 then return uri
+    if Instr(1, lc, ".m3u8") = 0 then return uri
+
+    headers = {}
+    if refer <> "" then headers["Referer"] = refer
+    res = HC_Get(session, uri, headers, 5000)
+    if res = invalid or res.body = "" then return uri
+    lines = res.body.Tokenize(chr(10))
+    if lines = invalid then return uri
+    for i = 0 to lines.Count() - 1
+        cand = U_Trim(lines[i])
+        if cand = "" or Left(cand, 1) = "#" then continue for
+        return RP_AbsUrl(cand, uri)
+    end for
+    return uri
+end function
+
 ' --- Generic subtitle scraping ---------------------------------------
 
 ' Pull every plain .vtt / .srt URL out of the page HTML. Used as a
@@ -303,45 +388,81 @@ function HM_MergeSubs(primary as Object, extra as Object) as Object
     return out
 end function
 
-' --- Free subtitle library (wyzie.io) -------------------------------
+' --- Free subtitle library (OpenSubtitles + wyzie.io) ---------------
 '
-' sub.wyzie.io aggregates OpenSubtitles, Subscene, and a handful of
-' smaller sources behind a single no-key public endpoint. Used as the
-' "the mirror returned no subs" fallback. Tries IMDB then TMDB so
-' partially-cataloged titles get coverage from whichever ID matches.
+' rest.opensubtitles.org's read-only search endpoint returns one record
+' per available subtitle file across many languages, but each record's
+' SubDownloadLink points to a gzipped .srt (which Roku's Video node
+' cannot consume). sub.wyzie.io operates a free public proxy that
+' fetches a SubDownloadLink, ungzips it, and converts SRT -> WebVTT on
+' the fly via the URL pattern:
+'   https://sub.wyzie.io/c/{vrf}/id/{sub_id}?format=vtt&encoding=UTF-8
+' where {vrf} and {sub_id} come from the SubDownloadLink path
+' "/vrf-{hex}/filead/{digits}". The two services together give us a
+' working free CC fallback for providers (notably airflix1 /
+' brightpathsignals / vaplayer.ru) that ship streams without inline
+' subtitles. Mirrors server.py:opensubtitles_search.
+'
+' OpenSubtitles indexes by IMDB only - TMDB ids are silently ignored
+' upstream, so we don't bother trying them here.
 
 function HM_FetchFreeSubs(imdb as String, tmdb as String, kind as String, season as Integer, episode as Integer, session as Object) as Object
-    out = []
-    out = HM_QueryWyzie(imdb, kind, season, episode, session)
-    if out.Count() > 0 then return out
-    out = HM_QueryWyzie(tmdb, kind, season, episode, session)
-    return out
+    return HM_QueryOpenSubtitles(imdb, kind, season, episode, session)
 end function
 
-function HM_QueryWyzie(id as String, kind as String, season as Integer, episode as Integer, session as Object) as Object
+function HM_QueryOpenSubtitles(imdbId as String, kind as String, season as Integer, episode as Integer, session as Object) as Object
     out = []
-    if id = invalid or id = "" then return out
-    url = "https://sub.wyzie.io/search?id=" + U_UrlEncode(id) + "&format=srt&encoding=utf-8"
+    if imdbId = invalid or imdbId = "" then return out
+    if Left(imdbId, 2) <> "tt" then return out
+    bare = Mid(imdbId, 3)
+    if bare = "" then return out
+
     if kind = "tv" and season > 0 and episode > 0 then
-        url = url + "&season=" + season.ToStr() + "&episode=" + episode.ToStr()
+        url = "https://rest.opensubtitles.org/search/episode-" + episode.ToStr() + "/imdbid-" + bare + "/season-" + season.ToStr()
+    else
+        url = "https://rest.opensubtitles.org/search/imdbid-" + bare
     end if
-    res = HC_Get(session, url, { "Accept": "application/json" }, 6000)
+
+    ' rest.opensubtitles.org rejects requests without a non-empty
+    ' X-User-Agent. Any string works for read-only search; the Python
+    ' resolver uses "trailers.to-UA" so we match it for parity.
+    res = HC_Get(session, url, {
+        "X-User-Agent": "trailers.to-UA"
+        "Accept": "application/json"
+    }, 6000)
     if res = invalid or res.body = "" then return out
-    data = ParseJSON(res.body)
-    if data = invalid or type(data) <> "roArray" then return out
-    for each it in data
-        if type(it) <> "roAssociativeArray" then continue for
-        u = ""
-        if it.url <> invalid then u = it.url
-        if u = "" then continue for
-        lang = "en"
-        if it.language <> invalid then lang = LCase(Left(it.language, 2))
-        if lang = "" and it.lang <> invalid then lang = LCase(Left(it.lang, 2))
-        name = ""
-        if it.display <> invalid then name = it.display
-        if name = "" and it.language <> invalid then name = it.language
-        if name = "" then name = UCase(lang)
-        out.Push({ url: u, language: lang, name: name })
+    if res.status < 200 or res.status >= 300 then return out
+    payload = ParseJSON(res.body)
+    if payload = invalid or type(payload) <> "roArray" then return out
+
+    vrfRe = CreateObject("roRegex", "/vrf-([a-f0-9]+)/filead/(\d+)", "i")
+    seenLangs = {}
+    for each entry in payload
+        if type(entry) <> "roAssociativeArray" then continue for
+        langId3 = ""
+        if entry.SubLanguageID <> invalid then langId3 = LCase(entry.SubLanguageID)
+        if langId3 = "" then continue for
+        if seenLangs.DoesExist(langId3) then continue for
+        downloadLink = ""
+        if entry.SubDownloadLink <> invalid then downloadLink = entry.SubDownloadLink
+        if downloadLink = "" then continue for
+        mt = vrfRe.match(downloadLink)
+        if mt = invalid or mt.Count() < 3 then continue for
+        vrf = mt[1]
+        subId = mt[2]
+        wyzieUrl = "https://sub.wyzie.io/c/" + vrf + "/id/" + subId + "?format=vtt&encoding=UTF-8"
+        iso2 = ""
+        if entry.ISO639 <> invalid then iso2 = LCase(entry.ISO639)
+        if iso2 = "" then iso2 = Left(langId3, 2)
+        nameStr = ""
+        if entry.LanguageName <> invalid then nameStr = entry.LanguageName
+        if nameStr = "" then nameStr = UCase(langId3)
+        out.Push({
+            url: wyzieUrl
+            language: iso2
+            name: nameStr
+        })
+        seenLangs[langId3] = true
     end for
     return out
 end function

@@ -20,8 +20,8 @@ sub init()
 
     m.navTabs = [
         { id: "navHome",     view: "HomeView",      args: invalid },
-        { id: "navMovies",   view: "ListView",      args: { source: "movies",  title: "Movies" } },
-        { id: "navTv",       view: "ListView",      args: { source: "tv",      title: "TV Shows" } },
+        { id: "navMovies",   view: "ListView",      args: { source: "movies",  title: "Movies",   kind: "movie" } },
+        { id: "navTv",       view: "ListView",      args: { source: "tv",      title: "TV Shows", kind: "tv" } },
         { id: "navTrending", view: "ListView",      args: { source: "popular", title: "Trending" } },
         { id: "navMyList",   view: "FavoritesView", args: invalid },
         { id: "navSearch",   view: "SearchView",    args: invalid }

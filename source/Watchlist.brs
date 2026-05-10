@@ -61,10 +61,16 @@ sub W_Write(key as String, data as Object)
     S_QueuePush()
 end sub
 
-' Position is "essentially finished" when within 90 seconds of the end OR
-' past 95% of total runtime - whichever the stream lets us detect first.
+' Position is "essentially finished" when within 7 minutes of the end
+' (typical credits + post-credits + previews window for TV episodes,
+' and well past the climax for feature-length movies) OR past 95% of
+' total runtime - whichever the stream lets us detect first. The 7-min
+' tail window only applies to runtimes >= 14 minutes; for shorter
+' content we fall back to a tight 90-second window so a 5-minute clip
+' can't be flagged "finished" the moment it starts.
 function W_IsFinished(posSec as Integer, dur as Integer) as Boolean
     if dur <= 0 then return false
+    if dur >= 840 and posSec >= dur - 420 then return true
     if posSec >= dur - 90 then return true
     if posSec >= Int(dur * 0.95) then return true
     return false

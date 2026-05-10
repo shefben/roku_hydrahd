@@ -139,6 +139,23 @@ sub onMirrorResult()
     m.grid.content = root
     m.grid.setFocus(true)
     m.status.text = m.mirrors.Count().ToStr() + " mirrors loaded - top-ranked first."
+    ' Caller (DetailsView Resume button, ResumePicker, etc.) can hint at
+    ' a previously-used mirror host. If we find a match in the freshly
+    ' fetched list we kick off resolve straight away - same UX as
+    ' "Resume on previous mirror" but for cases where the saved embed
+    ' URL is for a different episode and can't be replayed verbatim.
+    if m.args <> invalid and m.args.preferredMirrorHost <> invalid and m.args.preferredMirrorHost <> "" then
+        wantHost = LCase(m.args.preferredMirrorHost)
+        for i = 0 to m.mirrors.Count() - 1
+            mh = ""
+            if m.mirrors[i].host <> invalid then mh = LCase(m.mirrors[i].host)
+            if mh = wantHost then
+                m.status.text = "Resuming on " + m.mirrors[i].host + "..."
+                startResolveForMirror(m.mirrors[i])
+                return
+            end if
+        end for
+    end if
     if m.args <> invalid and m.args.autoPick = true then
         m.grid.itemSelected = 0
         onMirrorSelected()

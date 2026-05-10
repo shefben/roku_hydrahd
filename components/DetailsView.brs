@@ -27,6 +27,8 @@ sub init()
     m.seasonGroup = m.top.findNode("seasonGroup")
     m.seasonRow = m.top.findNode("seasonRow")
     m.epGrid = m.top.findNode("episodeGrid")
+    m.seasonResumeBtn = m.top.findNode("seasonResumeBtn")
+    m.seasonResumeBtn.observeField("buttonSelected", "onSeasonResumeSelected")
     m.epGrid.itemComponentName = "EpisodeItem"
     m.epGrid.observeField("itemSelected", "onEpisodeSelected")
     ' itemFocused fires every time the highlighted season changes (left/right
@@ -179,10 +181,13 @@ sub paintDetail()
     if m.kind = "tv" then
         m.seriesResume = computeSeriesResume()
         if m.seriesResume <> invalid then
-            label = "Resume S" + m.seriesResume.ep.season.ToStr() + "E" + m.seriesResume.ep.episode.ToStr()
+            label = buildResumeLabel(m.seriesResume)
             m.actions.buttons = [label, "Seasons", favButtonLabel()]
+            m.seasonResumeBtn.text = label
+            m.seasonResumeBtn.visible = true
         else
             m.actions.buttons = ["Seasons", favButtonLabel()]
+            m.seasonResumeBtn.visible = false
         end if
         if d.seasons <> invalid and d.seasons.Count() > 0 then
             renderSeasons()
@@ -199,6 +204,20 @@ sub paintDetail()
     end if
     m.actions.setFocus(true)
 end sub
+
+' Resume button label - "Resume S?E? at HH:MM" when picking up
+' mid-episode, "Play S?E?" when the most-recent episode was finished
+' and we're queueing up the next one.
+function buildResumeLabel(sr as Object) as String
+    if sr = invalid or sr.ep = invalid then return "Resume"
+    epTag = "S" + sr.ep.season.ToStr() + "E" + sr.ep.episode.ToStr()
+    rp = 0
+    if sr.resumePos <> invalid then rp = W_AsInt(sr.resumePos)
+    if rp >= W_MinResumeSeconds() then
+        return "Resume " + epTag + " - " + W_FormatTime(rp)
+    end if
+    return "Play " + epTag
+end function
 
 ' Star icon (filled or outlined) reflecting the current saved state.
 function favButtonLabel() as String
@@ -304,11 +323,25 @@ function computeSeriesResume() as Object
     if epEntry <> invalid then epDone = W_AsBool(epEntry.done)
 
     if W_AsBool(sp.done) or epDone then
-        nextT = findNextEpisode(season, episode)
-        if nextT <> invalid then
-            nextT.resumePos = 0
-            return nextT
-        end if
+        ' Walk forward through episodes, skipping ones the user has
+        ' already finished, until we hit one that's still unwatched.
+        ' This handles the case where the most-recent progress entry
+        ' is in a season the user has since completed entirely (e.g.
+        ' last-watched=S1E5 but they've also already finished S1E6-10):
+        ' the season picker should land on S2 instead of S1, and the
+        ' episode highlight should land on the first genuinely
+        ' unwatched episode rather than the just-finished one.
+        cur = target
+        while true
+            nextT = findNextEpisode(cur.ep.season, cur.ep.episode)
+            if nextT = invalid then exit while
+            ne = W_GetEpisodeProgress(m.detail.imdb, m.detail.href, nextT.ep.season, nextT.ep.episode)
+            if ne = invalid or not W_AsBool(ne.done) then
+                nextT.resumePos = 0
+                return nextT
+            end if
+            cur = nextT
+        end while
         ' Series fully watched - leave the highlight on the finale.
         target.resumePos = 0
         return target
@@ -380,16 +413,25 @@ sub onActionSelected()
         else if idx = 1 then
             openMirrorPicker(invalid, 0)
         else if idx = 2 then
-            openMirrorPicker(invalid, rp)
+            openMirrorPickerEx(invalid, rp, false)
         end if
     else
         ' Buttons: [Play, Choose Mirror, Save]
         if idx = 0 then
             openMirrorPicker(invalid, 0)
         else if idx = 1 then
-            openMirrorPicker(invalid, 0)
+            openMirrorPickerEx(invalid, 0, false)
         end if
     end if
+end sub
+
+' "Resume S?E? - HH:MM" / "Play S?E?" button inside the seasonGroup -
+' same dispatch as the top action bar's Resume button.
+sub onSeasonResumeSelected()
+    if m.seriesResume = invalid then return
+    rp = 0
+    if m.seriesResume.resumePos <> invalid then rp = W_AsInt(m.seriesResume.resumePos)
+    openMirrorPicker(m.seriesResume.ep, rp)
 end sub
 
 sub onShowSeasons()
@@ -447,9 +489,9 @@ sub selectSeason(idx as Integer)
         cell.SDPosterUrl = poster
         cell.id = ep.slug + "|" + ep.season.ToStr() + "|" + ep.episode.ToStr()
         ' EpisodeItem reads `releaseDate` as a watched-state badge:
-        '   "current:<label>" - up-next or resume target
-        '   "watched"         - finished
-        '   "partial:<time>"  - started but not finished
+        '   "current:<label>"  - up-next or resume target (yellow chip)
+        '   "watched"          - finished (green checkmark, 7-min rule)
+        '   "partial:<pct>"    - started but not finished (progress bar)
         marker = ""
         epEntry = W_GetEpisodeProgress(m.detail.imdb, m.detail.href, ep.season, ep.episode)
         if ei = targetEpIdx then
@@ -462,11 +504,24 @@ sub selectSeason(idx as Integer)
             else
                 marker = "current:Up next"
             end if
-        else if epEntry <> invalid and W_AsBool(epEntry.done) then
-            marker = "watched"
         else if epEntry <> invalid then
-            rp2 = W_ResumePosition(epEntry)
-            if rp2 > 0 then marker = "partial:" + W_FormatTime(rp2)
+            posSec = W_AsInt(epEntry.pos)
+            durSec = W_AsInt(epEntry.dur)
+            done = W_AsBool(epEntry.done)
+            ' Apply the 7-min-remaining rule even if the saved record
+            ' was written before the W_IsFinished threshold was bumped,
+            ' so old "almost done" entries paint as completed too.
+            if (not done) and durSec >= 840 and (durSec - posSec) < 420 then
+                done = true
+            end if
+            if done then
+                marker = "watched"
+            else if posSec > 0 and durSec > 0 then
+                pct = (posSec * 100) \ durSec
+                if pct < 1 then pct = 1
+                if pct > 99 then pct = 99
+                marker = "partial:" + pct.ToStr()
+            end if
         end if
         cell.releaseDate = marker
     end for
@@ -511,6 +566,15 @@ sub onMirrors()
 end sub
 
 sub openMirrorPicker(ep as Object, startPos as Integer)
+    openMirrorPickerEx(ep, startPos, true)
+end sub
+
+' useSavedMirror=true is the Resume / Play / Restart / Episode-click
+' behavior: if a previous mirror was recorded for this title, hand it
+' to MirrorPicker so playback skips the picker UI. "Choose Mirror"
+' passes false to force the full picker - that's the user explicitly
+' opting to switch hosts.
+sub openMirrorPickerEx(ep as Object, startPos as Integer, useSavedMirror as Boolean)
     if m.detail = invalid then return
     ' If no explicit resume position was passed (e.g. user picked an episode
     ' from the grid), still honor any progress we have for that episode.
@@ -559,6 +623,41 @@ sub openMirrorPicker(ep as Object, startPos as Integer)
         end if
     end if
     if startPos > 0 then args.startPosition = startPos
+
+    ' Saved-mirror handoff. For movies the saved embed URL covers the
+    ' whole title and goes through as directMirror (skips ServersTask
+    ' entirely). For TV the saved URL is episode-specific, so we only
+    ' use directMirror when the resume target IS that exact episode -
+    ' otherwise we hint at the host and let MirrorPicker auto-pick the
+    ' matching entry from a freshly fetched list. ResumePicker uses
+    ' the same shape; this just brings the DetailsView Resume / Play
+    ' / Episode-click paths into line with that.
+    if useSavedMirror then
+        ctx = invalid
+        if m.detail.imdb <> invalid or m.detail.href <> invalid then
+            ctx = W_GetContext(W_ItemKey(m.detail.imdb, m.detail.href))
+        end if
+        if ctx <> invalid and ctx.mirrorHost <> invalid and ctx.mirrorHost <> "" then
+            sameContent = (m.kind = "movie")
+            if not sameContent and ep <> invalid then
+                sp = W_GetSeriesProgress(m.detail.imdb, m.detail.href)
+                if sp <> invalid then
+                    if W_AsInt(sp.season) = ep.season and W_AsInt(sp.episode) = ep.episode then
+                        sameContent = true
+                    end if
+                end if
+            end if
+            if sameContent and ctx.mirrorLink <> invalid and ctx.mirrorLink <> "" then
+                dm = { host: ctx.mirrorHost, link: ctx.mirrorLink, name: "" }
+                if ctx.mirrorName <> invalid then dm.name = ctx.mirrorName
+                args.directMirror = dm
+            else
+                args.preferredMirrorHost = ctx.mirrorHost
+                if ctx.mirrorName <> invalid then args.preferredMirrorName = ctx.mirrorName
+            end if
+        end if
+    end if
+
     m.top.requestNav = {
         action: "open"
         view: "MirrorPicker"
@@ -577,13 +676,27 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     if key = "down" and m.actions.hasFocus() then
         if m.kind = "tv" then
             m.seasonGroup.visible = true
-            if seasonCount() > 1 then
+            if m.seasonResumeBtn.visible then
+                m.seasonResumeBtn.setFocus(true)
+            else if seasonCount() > 1 then
                 m.seasonRow.setFocus(true)
             else if m.epGrid.content <> invalid then
                 m.epGrid.setFocus(true)
             end if
             return true
         end if
+    end if
+    if key = "down" and m.seasonResumeBtn.hasFocus() then
+        if seasonCount() > 1 then
+            m.seasonRow.setFocus(true)
+        else if m.epGrid.content <> invalid then
+            m.epGrid.setFocus(true)
+        end if
+        return true
+    end if
+    if key = "up" and m.seasonResumeBtn.hasFocus() then
+        m.actions.setFocus(true)
+        return true
     end if
     if key = "down" and m.seasonRow.hasFocus() then
         if m.epGrid.content <> invalid then
@@ -594,13 +707,19 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     if key = "up" and m.epGrid.hasFocus() then
         if seasonCount() > 1 then
             m.seasonRow.setFocus(true)
+        else if m.seasonResumeBtn.visible then
+            m.seasonResumeBtn.setFocus(true)
         else
             m.actions.setFocus(true)
         end if
         return true
     end if
     if key = "up" and m.seasonRow.hasFocus() then
-        m.actions.setFocus(true)
+        if m.seasonResumeBtn.visible then
+            m.seasonResumeBtn.setFocus(true)
+        else
+            m.actions.setFocus(true)
+        end if
         return true
     end if
     return false

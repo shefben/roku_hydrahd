@@ -26,5 +26,22 @@ sub doWork()
         end if
     end for
 
+    ' Append two TV-specific rows. The hydrahd landing page mostly
+    ' surfaces movies under its "Latest" / "Top Rated" headers, so these
+    ' two extra rows give the home view dedicated TV-show coverage that
+    ' matches what /tv-shows/ and /tv-shows/star-rating/ return.
+    appendIfNonEmpty(capped, "Latest TV Shows",    HA_FetchTvShows(1))
+    appendIfNonEmpty(capped, "Top Rated TV Shows", HA_FetchTvShowsTopRated(1))
+
     m.top.result = { rows: capped }
+end sub
+
+sub appendIfNonEmpty(target as Object, title as String, items as Object)
+    if items = invalid or items.Count() = 0 then return
+    slice = []
+    for i = 0 to 23
+        if i >= items.Count() then exit for
+        slice.Push(items[i])
+    end for
+    target.Push({ title: title, items: slice })
 end sub

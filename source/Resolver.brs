@@ -120,9 +120,19 @@ function R_EnrichResult(raw as Object, args as Object, refer as String, session 
         raw.chapters = HM_FetchSkipTimes(imdb, tmdb, kind, season, episode, session)
     end if
 
-    ' Free subtitle library top-up. Most providers return what their
-    ' upstream advertised; fall back to wyzie.io's aggregated index
-    ' when we got nothing.
+    ' Subtitles, in stream-first priority order:
+    '   1. Whatever the provider already populated (most accurate -
+    '      the upstream's own player would use these).
+    '   2. HLS-embedded #EXT-X-MEDIA:TYPE=SUBTITLES renditions (also
+    '      coming from the upstream stream itself).
+    '   3. OpenSubtitles, rewritten through sub.wyzie.io's VTT proxy
+    '      so Roku can play the SRT-only OpenSubtitles tracks.
+    ' Each step only runs if the previous returned nothing.
+    if isHls then
+        if raw.subtitles = invalid or type(raw.subtitles) <> "roArray" or raw.subtitles.Count() = 0 then
+            raw.subtitles = HM_ExtractSubsHls(streamUrl, refUrl, session)
+        end if
+    end if
     if raw.subtitles = invalid or type(raw.subtitles) <> "roArray" or raw.subtitles.Count() = 0 then
         raw.subtitles = HM_FetchFreeSubs(imdb, tmdb, kind, season, episode, session)
     end if

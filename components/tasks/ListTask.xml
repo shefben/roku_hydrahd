@@ -2,6 +2,7 @@
 <component name="ListTask" extends="Task">
     <interface>
         <field id="source" type="string" />
+        <field id="path" type="string" />
         <field id="page" type="integer" value="1" />
         <field id="result" type="assocarray" alwaysNotify="true" />
     </interface>

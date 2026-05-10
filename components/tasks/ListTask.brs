@@ -5,8 +5,14 @@ end sub
 sub doWork()
     src = m.top.source
     page = m.top.page
+    pth = m.top.path
     items = []
-    if src = "movies" then
+    ' Filter / dropdown picks supply a relative path
+    ' ("movies/popular", "tv-shows/star-rating", "genres/...", "tv-tags/...")
+    ' that bypasses the named-source switch below.
+    if pth <> invalid and pth <> "" then
+        items = HA_FetchListByPath(pth, page)
+    else if src = "movies" then
         items = HA_FetchMovies(page)
     else if src = "tv" then
         items = HA_FetchTvShows(page)
