@@ -796,7 +796,23 @@ sub saveProgress(forceFinished as Boolean)
         if a.episode.slug <> invalid then slug = a.episode.slug
         name = ""
         if a.episode.name <> invalid then name = a.episode.name
-        W_SaveEpisodeProgress(imdb, href, a.episode.season, a.episode.episode, posSec, dur, slug, name)
+        ' Final-episode hint for Watchlist's series-completion logic.
+        ' DetailsView builds episodeQueue with every episode of every
+        ' season in show order; the last entry is the season finale of
+        ' the last broadcast season. ResumePicker -> MirrorPicker path
+        ' doesn't carry episodeQueue, so we fall back to 0 and the
+        ' Watchlist preserves whatever lastSeason/lastEpisode an earlier
+        ' DetailsView save populated.
+        lastSeason = 0
+        lastEpisode = 0
+        if a.episodeQueue <> invalid and a.episodeQueue.Count() > 0 then
+            finalEntry = a.episodeQueue[a.episodeQueue.Count() - 1]
+            if finalEntry <> invalid then
+                if finalEntry.season <> invalid then lastSeason = W_AsInt(finalEntry.season)
+                if finalEntry.episode <> invalid then lastEpisode = W_AsInt(finalEntry.episode)
+            end if
+        end if
+        W_SaveEpisodeProgress(imdb, href, a.episode.season, a.episode.episode, posSec, dur, slug, name, lastSeason, lastEpisode)
     else
         W_SaveMovieProgress(imdb, href, posSec, dur)
     end if

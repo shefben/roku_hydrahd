@@ -42,7 +42,7 @@ sub doWork()
     ' until they toggle it. Once Phase 2-4 providers are wired and the
     ' Roku-segment-header forwarding has been validated on real devices,
     ' the default flips to true.
-    inChannelOn = U_PrefDefault("inChannelResolve", false)
+    inChannelOn = U_PrefDefault("inChannelResolve", true)
     print "[ResolveTask] inChannelResolve="; inChannelOn
     if inChannelOn then
         out = resolveInChannel()

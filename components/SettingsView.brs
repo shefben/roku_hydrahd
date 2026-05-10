@@ -8,6 +8,8 @@ sub init()
     m.urlEditGroup = m.top.findNode("urlEditGroup")
     m.urlEditTitle = m.top.findNode("urlEditTitle")
     m.urlKb = m.top.findNode("urlKb")
+    m.layoutGroup = m.top.findNode("layoutGroup")
+    m.layoutGroupBaseY = 80
 
     ' Each row is its own ButtonGroup so left/right works inside the row.
     ' We track the rows in display order so onKeyEvent can move focus
@@ -76,7 +78,7 @@ sub refresh()
     r = U_PrefDefault("resolverUrl", U_DefaultResolverUrl())
     if r = "" then r = "(not set - falls back to best-effort scrape)"
     m.resolverValue.text = r
-    if U_PrefDefault("inChannelResolve", false) then
+    if U_PrefDefault("inChannelResolve", true) then
         m.inChannelValue.text = "Currently: ON - try resolving every mirror in-channel first."
         m.inChannelValue.color = "0x9affa0ff"
     else
@@ -257,6 +259,41 @@ function focusedRowIndex() as Integer
     return -1
 end function
 
+' Translate the LayoutGroup vertically so the currently-focused row
+' stays inside the visible viewport. Roku's LayoutGroup auto-stacks
+' the group children but doesn't scroll on its own; we shift the whole
+' group up when the user navigates to a row that would otherwise sit
+' below the screen. The viewport is loosely [120, 980] - enough room
+' for the page title at the top and a small bottom margin.
+sub scrollToFocusedRow()
+    if m.layoutGroup = invalid then return
+    if m.currentRow = invalid then return
+    if m.rowOrder = invalid or m.currentRow >= m.rowOrder.Count() then return
+    row = m.rowOrder[m.currentRow]
+    if row = invalid then return
+    rect = row.sceneBoundingRect()
+    if rect = invalid then return
+
+    viewportTop = 120
+    viewportBottom = 980
+    rowH = rect.height
+    if rowH = invalid or rowH < 1 then rowH = 60
+
+    delta = 0
+    if rect.y < viewportTop then
+        delta = viewportTop - rect.y
+    else if rect.y + rowH > viewportBottom then
+        delta = -(rect.y + rowH - viewportBottom)
+    end if
+    if delta = 0 then return
+
+    cur = m.layoutGroup.translation
+    if cur = invalid then return
+    newY = cur[1] + delta
+    if newY > m.layoutGroupBaseY then newY = m.layoutGroupBaseY
+    m.layoutGroup.translation = [cur[0], newY]
+end sub
+
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
 
@@ -289,6 +326,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         if rowIdx + 1 < m.rowOrder.Count() then
             m.rowOrder[rowIdx + 1].setFocus(true)
             m.currentRow = rowIdx + 1
+            scrollToFocusedRow()
             return true
         end if
         return false
@@ -297,6 +335,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         if rowIdx > 0 then
             m.rowOrder[rowIdx - 1].setFocus(true)
             m.currentRow = rowIdx - 1
+            scrollToFocusedRow()
             return true
         end if
         ' At top row - bubble to MainScene so it can re-focus the nav bar.

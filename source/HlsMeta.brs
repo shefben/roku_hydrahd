@@ -115,10 +115,10 @@ function HM_ParseAttrs(line as String) as Object
     re = CreateObject("roRegex", "([A-Z0-9-]+)=(" + chr(34) + "[^" + chr(34) + "]*" + chr(34) + "|[^,]*)", "g")
     matches = re.matchAll(line)
     if matches = invalid then return out
-    for each m in matches
-        if m.Count() < 3 then continue for
-        k = m[1]
-        v = m[2]
+    for each pair in matches
+        if pair.Count() < 3 then continue for
+        k = pair[1]
+        v = pair[2]
         if Len(v) >= 2 and Left(v, 1) = chr(34) and Right(v, 1) = chr(34) then
             v = Mid(v, 2, Len(v) - 2)
         end if
@@ -300,5 +300,357 @@ function HM_MergeSubs(primary as Object, extra as Object) as Object
             out.Push(s)
         end for
     end if
+    return out
+end function
+
+' --- Free subtitle library (wyzie.io) -------------------------------
+'
+' sub.wyzie.io aggregates OpenSubtitles, Subscene, and a handful of
+' smaller sources behind a single no-key public endpoint. Used as the
+' "the mirror returned no subs" fallback. Tries IMDB then TMDB so
+' partially-cataloged titles get coverage from whichever ID matches.
+
+function HM_FetchFreeSubs(imdb as String, tmdb as String, kind as String, season as Integer, episode as Integer, session as Object) as Object
+    out = []
+    out = HM_QueryWyzie(imdb, kind, season, episode, session)
+    if out.Count() > 0 then return out
+    out = HM_QueryWyzie(tmdb, kind, season, episode, session)
+    return out
+end function
+
+function HM_QueryWyzie(id as String, kind as String, season as Integer, episode as Integer, session as Object) as Object
+    out = []
+    if id = invalid or id = "" then return out
+    url = "https://sub.wyzie.io/search?id=" + U_UrlEncode(id) + "&format=srt&encoding=utf-8"
+    if kind = "tv" and season > 0 and episode > 0 then
+        url = url + "&season=" + season.ToStr() + "&episode=" + episode.ToStr()
+    end if
+    res = HC_Get(session, url, { "Accept": "application/json" }, 6000)
+    if res = invalid or res.body = "" then return out
+    data = ParseJSON(res.body)
+    if data = invalid or type(data) <> "roArray" then return out
+    for each it in data
+        if type(it) <> "roAssociativeArray" then continue for
+        u = ""
+        if it.url <> invalid then u = it.url
+        if u = "" then continue for
+        lang = "en"
+        if it.language <> invalid then lang = LCase(Left(it.language, 2))
+        if lang = "" and it.lang <> invalid then lang = LCase(Left(it.lang, 2))
+        name = ""
+        if it.display <> invalid then name = it.display
+        if name = "" and it.language <> invalid then name = it.language
+        if name = "" then name = UCase(lang)
+        out.Push({ url: u, language: lang, name: name })
+    end for
+    return out
+end function
+
+' --- Free skip-intro / outro times -----------------------------------
+'
+' Three-tier cascade for the "the upstream stream had no DATERANGE"
+' case. The first two are general TV/movie databases; the third is
+' anime-specific.
+'
+'   1. TheIntroDB (primary)  - api.theintrodb.org/v2/media. Community-
+'      curated, indexes by tmdb_id or imdb_id. Returns intro / recap /
+'      credits / preview arrays with start_ms / end_ms (millisecond
+'      timestamps). No API key required for reads.
+'   2. IntroDB (backup)      - api.introdb.app/segments. Different
+'      community database. Indexes by imdb_id only. Returns segments
+'      with segment_type and start_sec / end_sec (clock strings or
+'      raw seconds). No API key required.
+'   3. AniSkip (tertiary)    - api.aniskip.com/v2/skip-times. Anime
+'      only, indexed by MAL ID, so we resolve the title -> MAL via
+'      Jikan (primary) or AniList GraphQL (backup) before hitting it.
+'
+' Restricted to TV content because (a) movies don't typically have
+' skippable intros/outros and (b) all three databases are essentially
+' episode-keyed.
+
+function HM_FetchSkipTimes(imdb as String, tmdb as String, kind as String, season as Integer, episode as Integer, session as Object) as Object
+    out = []
+    if kind <> "tv" then return out
+    if episode = invalid or episode <= 0 then return out
+    if season = invalid then season = 0
+
+    out = HM_FetchTheIntroDB(imdb, tmdb, season, episode, session)
+    if out.Count() > 0 then return out
+
+    out = HM_FetchIntroDB(imdb, season, episode, session)
+    if out.Count() > 0 then return out
+
+    out = HM_FetchAniSkipForEpisode(tmdb, episode, session)
+    return out
+end function
+
+' --- Tier 1: TheIntroDB ---------------------------------------------
+
+' Hit api.theintrodb.org/v2/media with whatever id we have. tmdb_id is
+' preferred because it's an integer (no chance of url-encoding edge
+' cases); imdb_id with the leading "tt" is the documented fallback.
+' Response shape:
+'   { "tmdb_id":..., "type":"tv", "season":1, "episode":1,
+'     "intro":   [{"start_ms": ..., "end_ms": ...}, ...],
+'     "recap":   [...], "credits": [...], "preview": [...] }
+' Each timestamp is in milliseconds; null end_ms means "to end of
+' stream" which we can't seek to deterministically, so those entries
+' are skipped.
+function HM_FetchTheIntroDB(imdb as String, tmdb as String, season as Integer, episode as Integer, session as Object) as Object
+    out = []
+    if season <= 0 or episode <= 0 then return out
+
+    qParam = ""
+    if tmdb <> invalid and tmdb <> "" then
+        qParam = "tmdb_id=" + U_UrlEncode(tmdb)
+    else if imdb <> invalid and imdb <> "" then
+        qParam = "imdb_id=" + U_UrlEncode(imdb)
+    else
+        return out
+    end if
+
+    url = "https://api.theintrodb.org/v2/media?" + qParam + "&season=" + season.ToStr() + "&episode=" + episode.ToStr()
+    res = HC_Get(session, url, {
+        "Accept": "application/json"
+        "User-Agent": "HydraHD-Roku/1.0"
+    }, 5000)
+    if res = invalid or res.body = "" then return out
+    if res.status = 204 or res.status = 404 then return out
+    payload = ParseJSON(res.body)
+    if payload = invalid or type(payload) <> "roAssociativeArray" then return out
+
+    HM_AppendTheIntroDbSegments(payload.intro,   "intro",  out)
+    HM_AppendTheIntroDbSegments(payload.recap,   "recap",  out)
+    HM_AppendTheIntroDbSegments(payload.credits, "outro",  out)
+    return out
+end function
+
+' Push every {start_ms, end_ms} entry of an array as a {kind, start,
+' end}-shaped chapter onto `out`. Skips entries with missing or
+' equal-or-decreasing endpoints.
+sub HM_AppendTheIntroDbSegments(arr as Dynamic, kindOut as String, out as Object)
+    if arr = invalid or type(arr) <> "roArray" then return
+    for each seg in arr
+        if type(seg) <> "roAssociativeArray" then continue for
+        startMs = 0
+        if seg.start_ms <> invalid then startMs = seg.start_ms
+        endMs = invalid
+        if seg.end_ms <> invalid then endMs = seg.end_ms
+        if endMs = invalid then continue for
+        startVal = startMs / 1000.0
+        endVal = endMs / 1000.0
+        if endVal <= startVal then continue for
+        out.Push({ kind: kindOut, start: startVal, end: endVal })
+    end for
+end sub
+
+' --- Tier 2: IntroDB ------------------------------------------------
+
+' GET /segments?imdb_id=tt...&season=...&episode=... . IntroDB indexes
+' by IMDB only. Each record carries segment_type ("intro" / "recap" /
+' "outro" / "credits") and start_sec / end_sec which can be either
+' a numeric string in seconds or a clock-style string ("00:01:30" or
+' "1:30") - HM_ParseClockOrSeconds handles both.
+function HM_FetchIntroDB(imdb as String, season as Integer, episode as Integer, session as Object) as Object
+    out = []
+    if imdb = invalid or imdb = "" then return out
+    if season <= 0 or episode <= 0 then return out
+
+    url = "https://api.introdb.app/segments?imdb_id=" + U_UrlEncode(imdb) + "&season=" + season.ToStr() + "&episode=" + episode.ToStr()
+    res = HC_Get(session, url, {
+        "Accept": "application/json"
+        "User-Agent": "HydraHD-Roku/1.0"
+    }, 5000)
+    if res = invalid or res.body = "" then return out
+    if res.status = 204 or res.status = 404 then return out
+    payload = ParseJSON(res.body)
+    if payload = invalid then return out
+
+    items = invalid
+    if type(payload) = "roArray" then
+        items = payload
+    else if type(payload) = "roAssociativeArray" then
+        if payload.segments <> invalid and type(payload.segments) = "roArray" then items = payload.segments
+        if items = invalid and payload.data <> invalid and type(payload.data) = "roArray" then items = payload.data
+        if items = invalid and payload.results <> invalid and type(payload.results) = "roArray" then items = payload.results
+    end if
+    if items = invalid then return out
+
+    for each it in items
+        if type(it) <> "roAssociativeArray" then continue for
+        segType = ""
+        if it.segment_type <> invalid then segType = LCase(it.segment_type)
+        if segType = "" and it.type <> invalid then segType = LCase(it.type)
+        kindOut = ""
+        if segType = "intro" then kindOut = "intro"
+        if segType = "recap" then kindOut = "recap"
+        if segType = "outro" or segType = "credits" then kindOut = "outro"
+        if kindOut = "" then continue for
+
+        startVal = HM_ParseClockOrSeconds(it.start_sec)
+        endVal = HM_ParseClockOrSeconds(it.end_sec)
+        if endVal <= startVal then continue for
+        out.Push({ kind: kindOut, start: startVal, end: endVal })
+    end for
+    return out
+end function
+
+' Accept "60", 60, 60.5, "00:01:00", "1:00", "1:00:30" - return seconds
+' as Float. Used by IntroDB which can deliver either format depending
+' on which client submitted the segment.
+function HM_ParseClockOrSeconds(v as Dynamic) as Float
+    if v = invalid then return 0.0
+    t = type(v)
+    if t = "Integer" or t = "roInt" or t = "Float" or t = "roFloat" or t = "Double" or t = "roDouble" then
+        return v + 0.0
+    end if
+    if t = "String" or t = "roString" then
+        s = v
+        if s = "" then return 0.0
+        if Instr(1, s, ":") = 0 then return s.ToFloat()
+        parts = s.Tokenize(":")
+        if parts = invalid then return 0.0
+        n = parts.Count()
+        if n = 3 then
+            return parts[0].ToFloat() * 3600.0 + parts[1].ToFloat() * 60.0 + parts[2].ToFloat()
+        else if n = 2 then
+            return parts[0].ToFloat() * 60.0 + parts[1].ToFloat()
+        else
+            return s.ToFloat()
+        end if
+    end if
+    return 0.0
+end function
+
+' --- Tier 3: AniSkip (anime only) -----------------------------------
+
+' Resolve title -> MAL ID via Jikan (primary) then AniList (backup),
+' then query AniSkip with whichever returned a usable ID. Almost always
+' a no-op for live-action content, which is what we want.
+function HM_FetchAniSkipForEpisode(tmdb as String, episode as Integer, session as Object) as Object
+    out = []
+    if tmdb = invalid or tmdb = "" then return out
+    if episode <= 0 then return out
+
+    title = HM_FetchTitleFromTmdb(tmdb, "tv", session)
+    if title = "" then return out
+
+    malId = HM_LookupMalIdViaJikan(title, session)
+    if malId <> "" then
+        out = HM_FetchAniSkipByMal(malId, episode, session)
+        if out.Count() > 0 then return out
+    end if
+
+    malId2 = HM_LookupMalIdViaAnilist(title, session)
+    if malId2 <> "" and malId2 <> malId then
+        out = HM_FetchAniSkipByMal(malId2, episode, session)
+    end if
+    return out
+end function
+
+' Fetch the show's original (Japanese) title from TMDB. We hit the same
+' db.videasy.net mirror used by the Vidking / Videasy port to avoid
+' burning a TMDB API key. Falls back to localized title if original is
+' missing.
+function HM_FetchTitleFromTmdb(tmdb as String, kind as String, session as Object) as String
+    if tmdb = invalid or tmdb = "" then return ""
+    metaUrl = "https://db.videasy.net/3/" + kind + "/" + tmdb
+    res = HC_Get(session, metaUrl, {}, 5000)
+    if res = invalid or res.body = "" then return ""
+    meta = ParseJSON(res.body)
+    if meta = invalid or type(meta) <> "roAssociativeArray" then return ""
+    if kind = "tv" then
+        if meta.original_name <> invalid and meta.original_name <> "" then return meta.original_name
+        if meta.name <> invalid then return meta.name
+    else
+        if meta.original_title <> invalid and meta.original_title <> "" then return meta.original_title
+        if meta.title <> invalid then return meta.title
+    end if
+    return ""
+end function
+
+' Search Jikan for the title and return the first match's MAL ID.
+function HM_LookupMalIdViaJikan(title as String, session as Object) as String
+    if title = invalid or title = "" then return ""
+    url = "https://api.jikan.moe/v4/anime?q=" + U_UrlEncode(title) + "&limit=1"
+    res = HC_Get(session, url, { "Accept": "application/json" }, 5000)
+    if res = invalid or res.body = "" then return ""
+    payload = ParseJSON(res.body)
+    if payload = invalid or type(payload) <> "roAssociativeArray" then return ""
+    list = payload.data
+    if list = invalid or type(list) <> "roArray" or list.Count() = 0 then return ""
+    first = list[0]
+    if type(first) <> "roAssociativeArray" then return ""
+    if first.mal_id = invalid then return ""
+    return first.mal_id.ToStr()
+end function
+
+' GraphQL search via AniList -> idMal field. Used as the secondary MAL
+' lookup when Jikan rate-limits or returns no match.
+function HM_LookupMalIdViaAnilist(title as String, session as Object) as String
+    if title = invalid or title = "" then return ""
+    body = "{" + chr(34) + "query" + chr(34) + ":" + chr(34) + "query($s:String){Media(search:$s,type:ANIME){idMal}}" + chr(34) + "," + chr(34) + "variables" + chr(34) + ":{" + chr(34) + "s" + chr(34) + ":" + chr(34) + HM_JsonEscape(title) + chr(34) + "}}"
+    res = HC_Post(session, "https://graphql.anilist.co", { "Content-Type": "application/json", "Accept": "application/json" }, body, 5000)
+    if res = invalid or res.body = "" then return ""
+    payload = ParseJSON(res.body)
+    if payload = invalid or type(payload) <> "roAssociativeArray" then return ""
+    data = payload.data
+    if data = invalid or type(data) <> "roAssociativeArray" then return ""
+    media = data.Media
+    if media = invalid or type(media) <> "roAssociativeArray" then return ""
+    if media.idMal = invalid then return ""
+    return media.idMal.ToStr()
+end function
+
+' AniSkip /v2/skip-times/{malId}/{ep}?types[]=op&types[]=ed
+' Maps op -> intro, ed -> outro for the PlayerView skip banner.
+function HM_FetchAniSkipByMal(malId as String, episode as Integer, session as Object) as Object
+    out = []
+    if malId = invalid or malId = "" then return out
+    url = "https://api.aniskip.com/v2/skip-times/" + malId + "/" + episode.ToStr() + "?types[]=op&types[]=ed"
+    res = HC_Get(session, url, { "Accept": "application/json" }, 5000)
+    if res = invalid or res.body = "" then return out
+    payload = ParseJSON(res.body)
+    if payload = invalid or type(payload) <> "roAssociativeArray" then return out
+    if payload.found <> true then return out
+    results = payload.results
+    if results = invalid or type(results) <> "roArray" then return out
+    for each r in results
+        if type(r) <> "roAssociativeArray" then continue for
+        intvl = r.interval
+        if intvl = invalid or type(intvl) <> "roAssociativeArray" then continue for
+        startVal = 0.0
+        endVal = 0.0
+        if intvl.startTime <> invalid then startVal = intvl.startTime
+        if intvl.endTime <> invalid then endVal = intvl.endTime
+        if endVal <= startVal then continue for
+        skipType = ""
+        if r.skipType <> invalid then skipType = LCase(r.skipType)
+        kind = ""
+        if skipType = "op" then kind = "intro"
+        if skipType = "ed" then kind = "outro"
+        if skipType = "mixed-op" then kind = "intro"
+        if skipType = "mixed-ed" then kind = "outro"
+        if skipType = "recap" then kind = "recap"
+        if kind = "" then continue for
+        out.Push({ kind: kind, start: startVal, end: endVal })
+    end for
+    return out
+end function
+
+' Minimal JSON-string escaper for embedding a title in a GraphQL POST
+' body. Handles the four characters that would break the JSON literal.
+function HM_JsonEscape(s as String) as String
+    if s = invalid or s = "" then return ""
+    bs = chr(92)
+    out = s
+    re1 = CreateObject("roRegex", bs + bs, "g")
+    out = re1.replaceAll(out, bs + bs)
+    re2 = CreateObject("roRegex", chr(34), "g")
+    out = re2.replaceAll(out, bs + chr(34))
+    re3 = CreateObject("roRegex", chr(10), "g")
+    out = re3.replaceAll(out, bs + "n")
+    re4 = CreateObject("roRegex", chr(13), "g")
+    out = re4.replaceAll(out, bs + "r")
     return out
 end function
