@@ -219,17 +219,28 @@ sub startPlayback(url as String, fmt as String)
     cn.httpCertificatesFile = "common:/certs/ca-bundle.crt"
     if m.top.args.poster <> invalid then cn.HDPosterUrl = m.top.args.poster
 
-    headers = []
+    ' Use roHttpAgent + setHttpAgent rather than ContentNode.httpHeaders.
+    ' Per developer.roku.com/.../content-metadata.md: setting cn.httpHeaders
+    ' wipes any existing agent-level headers on play, so the two paths
+    ' don't compose - pick agent-only and put EVERY header (Referer,
+    ' Origin, User-Agent) on the agent. This is the documented pattern
+    ' for getting Referer to propagate to HLS segment fetches, which
+    ' some upstreams (cloudnestra, lookmovie, xpass) IP/Referer-strict-
+    ' check on every segment.
+    needAgent = false
+    agent = CreateObject("roHttpAgent")
     if m.streamReferer <> invalid and m.streamReferer <> "" then
-        headers.Push("Referer:" + m.streamReferer)
+        agent.AddHeader("Referer", m.streamReferer)
         org = m.streamReferer
         if Right(org, 1) = "/" then org = Left(org, Len(org) - 1)
-        headers.Push("Origin:" + org)
+        agent.AddHeader("Origin", org)
+        needAgent = true
     end if
     if m.streamUserAgent <> invalid and m.streamUserAgent <> "" then
-        headers.Push("User-Agent:" + m.streamUserAgent)
+        agent.AddHeader("User-Agent", m.streamUserAgent)
+        needAgent = true
     end if
-    if headers.Count() > 0 then cn.httpHeaders = headers
+    if needAgent then m.video.setHttpAgent(agent)
     print "[Player] starting "; url; " (referer="; m.streamReferer; ")"
 
     if m.subtitles.Count() > 0 then

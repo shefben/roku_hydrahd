@@ -465,13 +465,17 @@ function HA_ParseMirrors(html as String) as Object
         if quality = "" then
             quality = U_FirstMatch(link, "(2160p|1080p|720p|480p|4K|FHD|UHD|HD)")
         end if
+        host = HA_HostOf(link)
+        if HA_IsMirrorBlocked(host) then
+            continue for
+        end if
         out.Push({
             id: id
             name: name
             link: link
             qualityHint: U_Trim(U_HtmlDecode(quality))
             isPremium: Instr(1, flags, "premium") > 0
-            host: HA_HostOf(link)
+            host: host
         })
     end for
     return out
@@ -483,4 +487,20 @@ function HA_HostOf(url as String) as String
     if h = "" then return ""
     if Left(h, 4) = "www." then h = Mid(h, 5)
     return h
+end function
+
+' Hosts the channel cannot resolve (Cloudflare Turnstile / multi-host
+' meta-aggregator with runtime-derived URLs / custom anti-bot returning
+' empty zstd bodies). All of these already returned 204 in the external
+' Python resolver, so hiding them is a UX win and not a regression. See
+' docs/BLOCKED_MIRRORS.md for the full rationale and re-enable steps.
+function HA_IsMirrorBlocked(host as String) as Boolean
+    if host = invalid or host = "" then return false
+    h = LCase(host)
+    if Instr(1, h, "vidup.to") > 0 then return true
+    if Instr(1, h, "embedmaster.link") > 0 then return true
+    if Instr(1, h, "vidfast.pro") > 0 then return true
+    if Instr(1, h, "kllamrd.org") > 0 then return true
+    if Instr(1, h, "frembed.bond") > 0 then return true
+    return false
 end function

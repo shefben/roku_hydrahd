@@ -2,13 +2,19 @@
 '
 ' HydraHD aggregates third-party iframe embeds (vidsrc.cc, videasy.net,
 ' vidfast.pro, embed.su, etc.). Roku's Video node can only play direct
-' HLS / DASH / MP4 URLs, not arbitrary HTML players. We delegate the
-' extraction to a small companion HTTP service whose URL is configurable
-' in Settings ("Resolver URL"). See resolver/README.md.
+' HLS / DASH / MP4 URLs, not arbitrary HTML players.
 '
-' If the mirror URL is already a direct .m3u8 / .mp4 we just play it.
-' If no resolver is configured we attempt a best-effort scrape of the
-' iframe HTML for an .m3u8 / .mp4 URL.
+' Resolution path (in priority order):
+'   1. Direct passthrough if the URL is already .m3u8 / .mp4.
+'   2. In-channel resolver (Resolver.brs) if the inChannelResolve
+'      Settings toggle is on. This is the Standlone_Channel branch's
+'      goal: full BrightScript port of the Python resolver so no LAN
+'      host is required. Off by default until validated.
+'   3. External resolver service (resolver/server.py on a LAN host or
+'      Oracle A1 cloud relay) if a URL is configured in Settings.
+'   4. Best-effort regex scrape of the iframe HTML for any visible
+'      .m3u8 / .mp4 URL. Last-resort fallback that catches plain
+'      JWPlayer pages without crypto.
 
 sub init()
     m.top.functionName = "doWork"
@@ -16,8 +22,10 @@ end sub
 
 sub doWork()
     embedUrl = m.top.embedUrl
+    print "[ResolveTask] embedUrl="; embedUrl
 
     if U_LooksHls(embedUrl) or U_LooksMp4(embedUrl) then
+        print "[ResolveTask] direct passthrough"
         m.top.result = {
             url: embedUrl
             streamFormat: U_StreamFormat(embedUrl)
@@ -27,6 +35,23 @@ sub doWork()
             userAgent: ""
         }
         return
+    end if
+
+    ' In-channel resolver (Standlone_Channel feature). Default off so a
+    ' user upgrading from the previous build sees zero behaviour change
+    ' until they toggle it. Once Phase 2-4 providers are wired and the
+    ' Roku-segment-header forwarding has been validated on real devices,
+    ' the default flips to true.
+    inChannelOn = U_PrefDefault("inChannelResolve", false)
+    print "[ResolveTask] inChannelResolve="; inChannelOn
+    if inChannelOn then
+        out = resolveInChannel()
+        if out <> invalid and out.url <> "" then
+            print "[ResolveTask] in-channel HIT: "; out.url
+            m.top.result = out
+            return
+        end if
+        print "[ResolveTask] in-channel miss, falling through"
     end if
 
     ' Prefer the build-time hardcoded URL over any registry-cached one.
@@ -39,22 +64,45 @@ sub doWork()
     ' channels built without an IP.
     resolver = U_DefaultResolverUrl()
     if resolver = "" then resolver = U_PrefDefault("resolverUrl", "")
+    print "[ResolveTask] external resolver="; resolver
     if resolver <> "" then
         out = resolveViaService(resolver, embedUrl)
         if out <> invalid and out.url <> "" then
+            print "[ResolveTask] external HIT: "; out.url
             m.top.result = out
             return
         end if
+        print "[ResolveTask] external miss"
     end if
 
     out = resolveBestEffort(embedUrl)
     if out <> invalid and out.url <> "" then
+        print "[ResolveTask] best-effort HIT: "; out.url
         m.top.result = out
         return
     end if
 
+    print "[ResolveTask] ALL paths failed"
     m.top.result = { url: "", streamFormat: "hls", qualities: [], subtitles: [] }
 end sub
+
+' --- In-channel resolver dispatcher entry ---------------------------
+'
+' Bridges the Task-thread interface fields to Resolver.brs's
+' R_ResolveEmbed args shape. Returns the same envelope as resolveViaService.
+
+function resolveInChannel() as Object
+    args = {
+        embedUrl: m.top.embedUrl
+        refer:    m.top.refer
+        kind:     m.top.kind
+        imdb:     m.top.imdb
+        tmdb:     m.top.tmdb
+        season:   m.top.season
+        episode:  m.top.episode
+    }
+    return R_ResolveEmbed(args)
+end function
 
 function resolveViaService(resolver as String, embedUrl as String) as Object
     if Right(resolver, 1) = "/" then resolver = Left(resolver, Len(resolver) - 1)

@@ -20,13 +20,22 @@
             </Group>
 
             <Group>
-                <Label text="Stream Resolver URL (optional)" font="font:MediumBoldSystemFont" color="0xffffffff" />
-                <Label id="resolverHelp" translation="[0, 30]" width="1700" wrap="true" maxLines="3"
-                       text="HydraHD uses third-party iframe embeds. Roku can only play direct video URLs (HLS / MP4). Run the Python resolver in resolver/ on any machine on your LAN; the channel auto-discovers it on startup. If discovery fails (VLAN, AP isolation, etc.) use 'Auto-discover' here or 'Set Manually...' to enter the URL directly."
+                <Label text="In-Channel Resolver (experimental)" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                <Label id="inChannelHelp" translation="[0, 30]" width="1700" wrap="true" maxLines="3"
+                       text="Resolve mirror URLs directly inside the channel - no LAN host required. Off by default while implementation is incomplete; toggle on to test in-channel resolution. If a mirror fails, the channel still falls through to the Stream Resolver URL below."
                        font="font:SmallSystemFont" color="0x9a9a9aff" />
-                <Label id="resolverValue" translation="[0, 110]" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" />
-                <ButtonGroup id="resolverRow" translation="[0, 140]" layoutDirection="horiz" itemSpacings="[12]" minWidth="220" />
-                <Label id="resolverStatus" translation="[0, 195]" text="" font="font:SmallSystemFont" color="0x9affa0ff" />
+                <Label id="inChannelValue" translation="[0, 110]" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" />
+                <ButtonGroup id="inChannelRow" translation="[0, 140]" layoutDirection="horiz" itemSpacings="[12]" minWidth="170" />
+            </Group>
+
+            <Group>
+                <Label text="External Resolver URL (fallback)" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                <Label id="resolverHelp" translation="[0, 30]" width="1700" wrap="true" maxLines="4"
+                       text="Optional fallback used when the in-channel resolver above can't crack a mirror. Run resolver/server.py on any machine you control - LAN host (Pi / NAS / desktop) or cloud VPS (Oracle Always-Free, etc.). LAN hosts are auto-discovered via UDP 1901; for cloud paste the URL with 'Set Manually...'. See docs/RESOLVER_SETUP.md for deployment details."
+                       font="font:SmallSystemFont" color="0x9a9a9aff" />
+                <Label id="resolverValue" translation="[0, 130]" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" />
+                <ButtonGroup id="resolverRow" translation="[0, 160]" layoutDirection="horiz" itemSpacings="[12]" minWidth="220" />
+                <Label id="resolverStatus" translation="[0, 215]" text="" font="font:SmallSystemFont" color="0x9affa0ff" />
             </Group>
 
             <Group>
