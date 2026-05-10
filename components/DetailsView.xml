@@ -35,6 +35,11 @@
 
         <Group id="seasonGroup" translation="[60, 420]" visible="false">
             <Label id="seasonTitle" text="Seasons" font="font:LargeBoldSystemFont" color="0xffffffff" />
+            <!-- Right-aligned Resume button. Visible only when the user
+                 has prior progress on this show; clicking jumps straight
+                 into playback on the saved mirror, skipping MirrorPicker. -->
+            <Button id="seasonResumeBtn" translation="[1180, -6]" minWidth="570"
+                    text="Resume" showFocusFootprint="true" visible="false" />
             <MarkupGrid id="seasonRow" translation="[0, 40]"
                         itemSize="[170, 60]"
                         numRows="1"

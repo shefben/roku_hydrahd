@@ -13,6 +13,18 @@
 
     <children>
         <Label id="header" translation="[60, 10]" text="" font="font:LargeBoldSystemFont" color="0xffffffff" />
+
+        <!-- Sort/Filter dropdown trigger. Only the Movies and TV Shows
+             tabs have filter options - other ListView consumers (e.g.
+             Trending) leave kind="" so this button stays hidden and
+             the layout falls back to header-and-grid only. -->
+        <Button id="filterBtn"
+                translation="[1450, 4]"
+                minWidth="380"
+                text="Sort/Filter"
+                showFocusFootprint="true"
+                visible="false" />
+
         <MarkupGrid id="grid"
                     translation="[60, 70]"
                     itemSize="[230, 380]"
@@ -24,5 +36,24 @@
                     drawFocusFeedbackOnTop="true" />
         <Label id="empty" translation="[60, 400]" text="No results" font="font:MediumSystemFont"
                color="0x808080ff" visible="false" />
+
+        <!-- Dropdown overlay. Centered card with a vertical LabelList
+             of the genre / sort options scraped from hydrahd's own
+             /movies and /tv-shows pages. BACK or LEFT closes it
+             without applying. -->
+        <Group id="filterOverlay" visible="false">
+            <Rectangle width="1920" height="1080" color="0x000000cc" />
+            <Group translation="[680, 80]">
+                <Rectangle width="560" height="900" color="0xffffff20" />
+                <Rectangle translation="[2, 2]" width="556" height="896" color="0x141414ff" />
+                <Label translation="[24, 20]" width="510" height="36" text="Sort / Filter"
+                       font="font:MediumBoldSystemFont" color="0xffffffff" />
+                <LabelList id="filterList"
+                           translation="[20, 70]"
+                           itemSize="[520, 44]"
+                           numRows="18"
+                           drawFocusFeedback="true" />
+            </Group>
+        </Group>
     </children>
 </component>

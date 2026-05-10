@@ -15,8 +15,12 @@
             m.title = m.top.findNode("title")
             m.airdate = m.top.findNode("airdate")
             m.desc = m.top.findNode("desc")
-            m.badge = m.top.findNode("badge")
-            m.badgeLabel = m.top.findNode("badgeLabel")
+            m.currentBadge = m.top.findNode("currentBadge")
+            m.currentLabel = m.top.findNode("currentLabel")
+            m.checkBadge = m.top.findNode("checkBadge")
+            m.progressBadge = m.top.findNode("progressBadge")
+            m.progressFill = m.top.findNode("progressFill")
+            m.progressBarWidth = 320
             m.statusKind = ""
         end sub
         sub onContent()
@@ -35,9 +39,9 @@
             end if
 
             ' DetailsView packs watched-state into releaseDate as
-            '   "current:<text>" - up next / resume target (yellow badge)
-            '   "watched"        - finished (green check)
-            '   "partial:<time>" - started but not finished (gray dot)
+            '   "current:<text>" - up next / resume target (yellow chip)
+            '   "watched"        - finished (green checkmark)
+            '   "partial:<pct>"  - started but not finished (progress bar)
             marker = ""
             if c.releaseDate <> invalid then marker = c.releaseDate
             kind = marker
@@ -48,26 +52,24 @@
                 text = Mid(marker, colon + 1)
             end if
             m.statusKind = kind
+            m.currentBadge.visible = false
+            m.checkBadge.visible = false
+            m.progressBadge.visible = false
             if kind = "current" then
-                m.badge.color = "0xffd24aff"
-                m.badgeLabel.color = "0x141414ff"
                 if text = "" then text = "Up next"
-                m.badgeLabel.text = text
-                m.badge.visible = true
+                m.currentLabel.text = text
+                m.currentBadge.visible = true
             else if kind = "watched" then
-                m.badge.color = "0x2ea043ff"
-                m.badgeLabel.color = "0xffffffff"
-                m.badgeLabel.text = "Watched"
-                m.badge.visible = true
+                m.checkBadge.visible = true
             else if kind = "partial" then
-                m.badge.color = "0x4a4a4aff"
-                m.badgeLabel.color = "0xffffffff"
-                if text = "" then text = "In progress"
-                m.badgeLabel.text = text
-                m.badge.visible = true
-            else
-                m.badge.visible = false
-                m.badgeLabel.text = ""
+                pct = 0
+                if text <> "" then pct = text.ToInt()
+                if pct < 1 then pct = 1
+                if pct > 99 then pct = 99
+                fill = (m.progressBarWidth * pct) / 100
+                if fill < 2 then fill = 2
+                m.progressFill.width = fill
+                m.progressBadge.visible = true
             end if
             applyRowColors(false)
         end sub
@@ -106,10 +108,29 @@
                font="font:SmallSystemFont" color="0x9a9a9aff" />
         <Label id="desc" translation="[220, 92]" width="1140" maxLines="2" text=""
                font="font:SmallSystemFont" color="0xc8c8c8ff" wrap="true" />
-        <Rectangle id="badge" translation="[1380, 14]" width="350" height="36"
-                   color="0xffd24aff" visible="false" />
-        <Label id="badgeLabel" translation="[1380, 14]" width="350" height="36" text=""
-               font="font:SmallBoldSystemFont" color="0x141414ff"
-               horizAlign="center" vertAlign="center" />
+        <!-- "Up next" / "Resume HH:MM" chip - yellow filled rectangle. -->
+        <Group id="currentBadge" translation="[1380, 14]" visible="false">
+            <Rectangle width="350" height="36" color="0xffd24aff" />
+            <Label id="currentLabel" width="350" height="36" text=""
+                   font="font:SmallBoldSystemFont" color="0x141414ff"
+                   horizAlign="center" vertAlign="center" />
+        </Group>
+
+        <!-- "Watched" indicator - green square with a Unicode checkmark. -->
+        <Group id="checkBadge" translation="[1694, 14]" visible="false">
+            <Rectangle width="36" height="36" color="0x2ea043ff" />
+            <Label width="36" height="36" text="&#10003;"
+                   font="font:LargeBoldSystemFont" color="0xffffffff"
+                   horizAlign="center" vertAlign="center" />
+        </Group>
+
+        <!-- "In progress" indicator - 320x8 horizontal progress bar
+             tinted gold to match the resume / continue-watching chrome
+             elsewhere. The fill rectangle's width is set per-row in
+             onContent based on the percentage in the marker string. -->
+        <Group id="progressBadge" translation="[1410, 56]" visible="false">
+            <Rectangle width="320" height="8" color="0x4a4a4aff" />
+            <Rectangle id="progressFill" width="0" height="8" color="0xffd24aff" />
+        </Group>
     </children>
 </component>

@@ -228,6 +228,27 @@ function HA_FetchTvShowsTopRated(page as Integer) as Object
     return HA_ParseCards(html)
 end function
 
+' Generic list fetcher used by the Movies / TV-Shows tab dropdowns.
+' hydrahd's URL convention is "/{path}/{page}" with NO trailing slash:
+' "/movies/popular/2", "/tv-shows/star-rating/3", "/genres/...-online-free/2".
+' A trailing slash silently drops the page number and returns the
+' generic landing page, so we never emit one. The bare /movies and
+' /tv-shows paths don't paginate at all - they're "page 1 only"
+' aliases - so we remap them to their explicit chronological-sort
+' variants (/movies/date and /tv-shows/date) which DO paginate.
+function HA_FetchListByPath(path as String, page as Integer) as Object
+    if path = invalid or path = "" then path = "movies"
+    if page < 1 then page = 1
+    p = path
+    if Left(p, 1) = "/" then p = Mid(p, 2)
+    if Right(p, 1) = "/" then p = Left(p, Len(p) - 1)
+    if p = "movies" then p = "movies/date"
+    if p = "tv-shows" then p = "tv-shows/date"
+    url = HA_Base() + "/" + p + "/" + page.ToStr()
+    html = HA_Get(url, HA_Base() + "/")
+    return HA_ParseCards(html)
+end function
+
 function HA_Search(query as String) as Object
     url = HA_Base() + "/index.php?menu=search&query=" + U_UrlEncode(query)
     html = HA_Get(url, HA_Base() + "/")

@@ -18,7 +18,9 @@ state sync.
 
 ### Browsing & discovery
 - **Home page** with Trending, Latest, Top Rated, Popular TV rows
-  scraped from the HydraHD index page (titles, posters, year, rating).
+  scraped from the HydraHD index page (titles, posters, year, rating),
+  plus dedicated **Latest TV Shows** and **Top Rated TV Shows** rows
+  pulled from `/tv-shows` and `/tv-shows/star-rating`.
 - **Continue Watching** row pinned to the top of Home for any title
   you've started but not finished. For TV, the show stays here until
   you finish the **last episode of the last season** - finishing one
@@ -28,6 +30,12 @@ state sync.
   you've manually starred from the Details page.
 - **Catalog tabs** for Movies, TV Shows, Trending - paginated grids
   that keep loading more as you scroll.
+- **Sort / Filter dropdown** on the Movies and TV Shows tabs. Same
+  options HydraHD's own `<select>` exposes: Just Added, Popular,
+  Rating, Featured, By Year for movies (plus 21 genres);
+  Latest, Rating, Popular for TV (plus 25 genre tags). Press UP from
+  the top row of the grid to focus the picker, OK to open the
+  dropdown.
 - **Resume bars on every poster** - a thin red progress bar at the
   bottom of any poster the user has started shows how far through it
   they are.
@@ -45,8 +53,25 @@ state sync.
   poster, backdrop, plus a Save-to-List toggle.
 - **Seasons & Episodes** - season chip row + episode grid. The
   episode you should watch next is highlighted with a "Resume HH:MM"
-  or "Up next" badge; finished episodes show a green "Watched" badge;
-  partially-watched ones show "In progress".
+  or "Up next" yellow chip; finished episodes show a green
+  **checkmark**; partially-watched ones show a small **progress bar**
+  filled to the % they reached. An episode counts as finished once
+  the playhead is within **7 minutes of the end** (the typical
+  credits + previews window) - this also flips it to the checkmark
+  retroactively at render time, even for old saved entries.
+- **In-place Resume button** on the seasons screen, sitting next to
+  the "Seasons" header. One-click jumps straight into playback at
+  your last stop position (or the next-up episode if you finished
+  the previous one). Reuses the same mirror you originally picked
+  for this show, skipping the picker UI entirely. Same applies to
+  the top-bar Resume action and Movie Resume / Restart - "Choose
+  Mirror" is the explicit opt-out when you want to switch hosts.
+- **Smart season default** - when the most-recent episode is finished
+  and you've already completed every following episode in that season
+  too, the season picker lands on the **next** season instead of
+  re-offering the completed one. Watched episodes stay visible and
+  scrollable; you just don't have to scroll past them to see what's
+  next up.
 - **Mirror picker** - lists every server HydraHD has for the title
   with host, quality hint, and a reliability score (% success / total).
   Mirrors are auto-sorted so the most reliable for your device come
@@ -63,7 +88,9 @@ state sync.
     picked automatically on play; "Auto" stays available so the player
     can drop back to ABR if your bandwidth can't sustain it.
   - **Subtitles** - tracks the resolver returned, plus a free fallback
-    fetched from sub.wyzie.io when the mirror itself didn't ship any.
+    fetched from rest.opensubtitles.org (one entry per language) and
+    rewritten through sub.wyzie.io's VTT-conversion proxy when the
+    mirror itself didn't ship any.
   - **CC styling** - text size, color, and background opacity presets.
   - **Audio track** picker.
   - **Resume / Stop** controls.
@@ -296,8 +323,11 @@ The result is then **enriched** by `HlsMeta.brs`:
   chapters.
 - If the upstream gave no chapters, the channel queries TheIntroDB
   -> IntroDB -> AniSkip in turn for community-curated skip times.
-- If the upstream gave no subtitles, sub.wyzie.io is queried for a
-  free aggregated subtitle list.
+- If the upstream gave no subtitles, the channel queries
+  rest.opensubtitles.org for one record per available language and
+  rewrites each SubDownloadLink to `sub.wyzie.io/c/{vrf}/id/{sub_id}
+  ?format=vtt&encoding=UTF-8`, which converts the gzipped SRT to
+  WebVTT on the fly so the Roku Video node can play it directly.
 
 ### Providers the in-channel resolver handles
 
