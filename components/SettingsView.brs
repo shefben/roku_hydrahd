@@ -16,6 +16,11 @@ sub init()
     m.baseRow.buttons = ["Use hydrahd.ru", "Edit URL"]
     m.baseRow.observeField("buttonSelected", "onBaseRowSelected")
 
+    m.inChannelValue = m.top.findNode("inChannelValue")
+    m.inChannelRow = m.top.findNode("inChannelRow")
+    m.inChannelRow.buttons = ["Off", "On"]
+    m.inChannelRow.observeField("buttonSelected", "onInChannelRowSelected")
+
     m.resolverRow = m.top.findNode("resolverRow")
     m.resolverRow.buttons = ["Auto-discover", "Set Manually...", "Clear"]
     m.resolverRow.observeField("buttonSelected", "onResolverRowSelected")
@@ -38,7 +43,8 @@ sub init()
     m.urlActionsRow.buttons = ["Save", "Cancel"]
     m.urlActionsRow.observeField("buttonSelected", "onUrlActionsSelected")
 
-    m.rowOrder = [m.baseRow, m.resolverRow, m.ccSizeRow, m.ccColorRow, m.ccBgRow]
+    m.rowOrder = [m.baseRow, m.inChannelRow, m.resolverRow, m.ccSizeRow, m.ccColorRow, m.ccBgRow]
+    m.currentRow = 0
 
     m.editTarget = ""
     m.baseRow.setFocus(true)
@@ -62,6 +68,7 @@ sub onSelfFocusChanged()
         return
     end if
     m.baseRow.setFocus(true)
+    m.currentRow = 0
 end sub
 
 sub refresh()
@@ -69,7 +76,24 @@ sub refresh()
     r = U_PrefDefault("resolverUrl", U_DefaultResolverUrl())
     if r = "" then r = "(not set - falls back to best-effort scrape)"
     m.resolverValue.text = r
+    if U_PrefDefault("inChannelResolve", false) then
+        m.inChannelValue.text = "Currently: ON - try resolving every mirror in-channel first."
+        m.inChannelValue.color = "0x9affa0ff"
+    else
+        m.inChannelValue.text = "Currently: OFF - use the external resolver URL below."
+        m.inChannelValue.color = "0xc8c8c8ff"
+    end if
     paintCcPreview()
+end sub
+
+sub onInChannelRowSelected()
+    idx = m.inChannelRow.buttonSelected
+    if idx = 0 then
+        U_PrefSet("inChannelResolve", "false")
+    else if idx = 1 then
+        U_PrefSet("inChannelResolve", "true")
+    end if
+    refresh()
 end sub
 
 sub onBaseRowSelected()
@@ -148,9 +172,11 @@ sub onUrlActionsSelected()
         m.urlEditGroup.visible = false
         refresh()
         m.baseRow.setFocus(true)
+        m.currentRow = 0
     else if idx = 1 then
         m.urlEditGroup.visible = false
         m.baseRow.setFocus(true)
+        m.currentRow = 0
     end if
 end sub
 
@@ -218,9 +244,15 @@ sub paintCcPreview()
 end sub
 
 ' Find which row is currently focused, or -1.
+'
+' isInFocusChain returns true if this node OR any of its descendants
+' has focus. ButtonGroup.setFocus(true) actually focuses the underlying
+' Button child, so plain hasFocus() returns false on the ButtonGroup
+' itself - which made the previous version of this helper always return
+' -1 and silently swallow up/down navigation.
 function focusedRowIndex() as Integer
     for i = 0 to m.rowOrder.Count() - 1
-        if m.rowOrder[i].hasFocus() then return i
+        if m.rowOrder[i].isInFocusChain() then return i
     end for
     return -1
 end function
@@ -233,13 +265,14 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         if key = "back" then
             m.urlEditGroup.visible = false
             m.baseRow.setFocus(true)
+            m.currentRow = 0
             return true
         end if
-        if key = "down" and m.urlKb.hasFocus() then
+        if key = "down" and m.urlKb.isInFocusChain() then
             m.urlActionsRow.setFocus(true)
             return true
         end if
-        if key = "up" and m.urlActionsRow.hasFocus() then
+        if key = "up" and m.urlActionsRow.isInFocusChain() then
             m.urlKb.setFocus(true)
             return true
         end if
@@ -247,10 +280,15 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     end if
 
     rowIdx = focusedRowIndex()
-    if rowIdx < 0 then return false
+    ' Fall back to the cached row if isInFocusChain failed for some reason
+    ' (e.g. focus transiently sitting on the View root after a re-focus).
+    if rowIdx < 0 then
+        if m.currentRow <> invalid then rowIdx = m.currentRow else rowIdx = 0
+    end if
     if key = "down" then
         if rowIdx + 1 < m.rowOrder.Count() then
             m.rowOrder[rowIdx + 1].setFocus(true)
+            m.currentRow = rowIdx + 1
             return true
         end if
         return false
@@ -258,6 +296,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     if key = "up" then
         if rowIdx > 0 then
             m.rowOrder[rowIdx - 1].setFocus(true)
+            m.currentRow = rowIdx - 1
             return true
         end if
         ' At top row - bubble to MainScene so it can re-focus the nav bar.

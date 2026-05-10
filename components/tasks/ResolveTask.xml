@@ -13,4 +13,13 @@
     <script type="text/brightscript" uri="pkg:/components/tasks/ResolveTask.brs" />
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
     <script type="text/brightscript" uri="pkg:/source/HydraApi.brs" />
+    <script type="text/brightscript" uri="pkg:/source/HttpClient.brs" />
+    <script type="text/brightscript" uri="pkg:/source/JsUnpack.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Bytes.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Rc4.brs" />
+    <script type="text/brightscript" uri="pkg:/source/EvpBytesToKey.brs" />
+    <script type="text/brightscript" uri="pkg:/source/AesGcm256.brs" />
+    <script type="text/brightscript" uri="pkg:/source/HlsMeta.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Resolver.brs" />
+    <script type="text/brightscript" uri="pkg:/source/ResolverProviders.brs" />
 </component>
