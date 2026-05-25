@@ -418,6 +418,24 @@ function HA_ParseSeasons(html as String) as Object
     return seasons
 end function
 
+' Fetch the description for a specific episode from its own page.
+' Called by EpDescTask; result is cached in DetailsView so we only
+' make the network request once per episode per session.
+function HA_FetchEpisodeDesc(slug as String, season as Integer, episode as Integer) as String
+    url = HA_Base() + "/watchseries/" + slug + "-online-free/season/" + season.ToStr() + "/episode/" + episode.ToStr()
+    html = HA_Get(url, HA_Base() + "/")
+    if html = "" then return ""
+    ' Try og:description first (usually episode-specific on detail pages).
+    desc = U_FirstMatch(html, "<meta property=" + chr(34) + "og:description" + chr(34) + " content=" + chr(34) + "([^" + chr(34) + "]+)" + chr(34))
+    if desc = "" then
+        desc = U_FirstMatch(html, "<p style=" + chr(34) + "font-size:16px;color:\s*#fff" + chr(34) + ">([^<]+)</p>")
+    end if
+    if desc = "" then
+        desc = U_FirstMatch(html, "<meta name=" + chr(34) + "description" + chr(34) + " content=" + chr(34) + "([^" + chr(34) + "]+)" + chr(34))
+    end if
+    return U_Trim(U_HtmlDecode(desc))
+end function
+
 ' --- Stream / mirror discovery ---------------------------------------
 
 ' Returns array of mirror objects:

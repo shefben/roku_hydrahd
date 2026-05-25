@@ -265,16 +265,26 @@ function RP_ResolveAirflix(embedUrl as String, refer as String, session as Objec
     streams = data.stream_urls
     if streams = invalid or type(streams) <> "roArray" or streams.Count() = 0 then return invalid
 
-    rawSubs = envelope.default_subs
-    if rawSubs = invalid then rawSubs = data.default_subs
+    ' Airflix serves subtitles in TWO separate lists: "subs" (usually just
+    ' English) and "default_subs" (all languages). The old code only read
+    ' default_subs, so shows with English-only in "subs" showed no CC
+    ' options at all, and shows that appeared in both lists auto-selected
+    ' a non-Latin language because it was first. Fix: merge all four
+    ' possible locations, deduplicate by URL, sort English first.
     subs = []
-    if rawSubs <> invalid and type(rawSubs) = "roArray" then
-        for each s in rawSubs
+    seenSubUrl = {}
+    allRawSubs = []
+    subSources = [envelope.subs, data.subs, envelope.default_subs, data.default_subs]
+    for each lst in subSources
+        if lst = invalid or type(lst) <> "roArray" then continue for
+        for each s in lst
             if type(s) <> "roAssociativeArray" then continue for
             surl = ""
             if s.url <> invalid then surl = s.url
             if surl = "" and s.file <> invalid then surl = s.file
             if surl = "" then continue for
+            if seenSubUrl.DoesExist(surl) then continue for
+            seenSubUrl[surl] = true
             lang = "en"
             if s.lang <> invalid then lang = LCase(s.lang)
             if lang = "" and s.language <> invalid then lang = LCase(s.language)
@@ -283,9 +293,17 @@ function RP_ResolveAirflix(embedUrl as String, refer as String, session as Objec
             if name = "" then
                 if s.lang <> invalid then name = UCase(s.lang) else name = "EN"
             end if
-            subs.Push({ url: surl, language: lang, name: name })
+            allRawSubs.Push({ url: surl, language: lang, name: name })
         end for
-    end if
+    end for
+    ' English first so the CC panel defaults to it and Roku's language
+    ' matching doesn't auto-select a track the device has no font for.
+    for each sub in allRawSubs
+        if sub.language = "en" then subs.Push(sub)
+    end for
+    for each sub in allRawSubs
+        if sub.language <> "en" then subs.Push(sub)
+    end for
 
     for each streamUrl in streams
         if type(streamUrl) <> "String" and type(streamUrl) <> "roString" then continue for
