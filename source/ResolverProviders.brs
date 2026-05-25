@@ -298,11 +298,11 @@ function RP_ResolveAirflix(embedUrl as String, refer as String, session as Objec
     end for
     ' English first so the CC panel defaults to it and Roku's language
     ' matching doesn't auto-select a track the device has no font for.
-    for each sub in allRawSubs
-        if sub.language = "en" then subs.Push(sub)
+    for each track in allRawSubs
+        if track.language = "en" then subs.Push(track)
     end for
-    for each sub in allRawSubs
-        if sub.language <> "en" then subs.Push(sub)
+    for each track in allRawSubs
+        if track.language <> "en" then subs.Push(track)
     end for
 
     for each streamUrl in streams
