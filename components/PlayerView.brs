@@ -84,6 +84,18 @@ sub init()
     m.activeChapterIsCountdown = false
     m.bannerDismissed = false
 
+    ' Time-based "Skip to Next Episode" banner. Fires 135 s before the
+    ' episode ends for any TV show with a queued next episode, independent
+    ' of chapter data so it works on every mirror/host. m.nextEpActive
+    ' stays true for the remainder of the episode once the window opens
+    ' so the action-bar entry persists in the overlay after the floating
+    ' banner has timed out.
+    m.nextEpBanner = m.top.findNode("nextEpBanner")
+    m.nextEpTimer = m.top.findNode("nextEpTimer")
+    m.nextEpTimer.observeField("fire", "onNextEpTimerFire")
+    m.nextEpActive = false      ' true while within 135 s of end AND next ep queued
+    m.nextEpBannerShown = false ' true once floating banner has been displayed this ep
+
     ' Populate the action bar at least once so it has something for
     ' the user to focus on when the overlay first opens.
     rebuildActionBar()
@@ -167,6 +179,11 @@ sub onArgs()
     ' stream. updateSkipBanner will re-establish state once playback
     ' enters the new chapters' windows.
     clearActiveChapter()
+    ' Reset time-based next-ep banner for the incoming episode.
+    m.nextEpActive = false
+    m.nextEpBannerShown = false
+    if m.nextEpBanner <> invalid then m.nextEpBanner.visible = false
+    if m.nextEpTimer <> invalid then m.nextEpTimer.control = "stop"
 
     print "[Player] qualities="; m.qualities.Count(); " subs="; m.subtitles.Count(); " chapters="; m.chapters.Count(); " resumeAt="; m.startPosition
     ' Default to the highest-bitrate variant the resolver advertised so
@@ -538,6 +555,7 @@ end sub
 sub onVideoPosition()
     posSec = W_AsInt(m.video.position)
     updateSkipBanner(posSec)
+    updateNextEpBanner(posSec)
     ' Save the very first heartbeat (so a quick exit still records something),
     ' then throttle to once every 5s while playing.
     if not m.progressSaved then
@@ -664,6 +682,67 @@ sub clearActiveChapter()
     end if
 end sub
 
+' Show the time-based "Skip to Next Episode" floating button when the
+' playhead is within 135 s (2 m 15 s) of the end of a TV episode that
+' has a queued successor. Independent of chapter data - fires on every
+' mirror / host. The floating banner appears once and hides after 10 s;
+' the action-bar entry in the overlay persists until the episode ends.
+sub updateNextEpBanner(posSec as Integer)
+    a = m.top.args
+    if a = invalid or a.kind <> "tv" then return
+    if a.episodeQueue = invalid or a.episodeQueueIndex = invalid then return
+    if a.episodeQueueIndex + 1 >= a.episodeQueue.Count() then return
+
+    dur = W_AsInt(m.video.duration)
+    if dur <= 0 then return
+    remaining = dur - posSec
+
+    wasActive = m.nextEpActive
+    m.nextEpActive = (remaining >= 0 and remaining <= 135)
+
+    ' Entering or leaving the window? Re-render the action bar if
+    ' the overlay happens to be open so the button appears/vanishes.
+    if m.nextEpActive <> wasActive then
+        if m.overlay <> invalid and m.overlay.visible then rebuildActionBar()
+    end if
+
+    if not m.nextEpActive then return
+
+    ' Show the floating banner exactly once per episode. Suppressed when:
+    '   - already shown/timed-out this episode (m.nextEpBannerShown)
+    '   - overlay is open (action-bar entry is the UI there)
+    '   - an outro chapter is already showing the same "Play Next Episode" prompt
+    if m.nextEpBannerShown then return
+    if m.overlay <> invalid and m.overlay.visible then return
+    if m.activeChapterKind = "outro" then return
+    if m.nextEpBanner.visible then return
+
+    m.nextEpBanner.visible = true
+    m.nextEpBannerShown = true
+    m.nextEpTimer.control = "start"
+end sub
+
+' 10-second banner timer fired: hide the floating button.
+' m.nextEpActive stays true so the action-bar entry remains.
+sub onNextEpTimerFire()
+    if m.nextEpBanner <> invalid then m.nextEpBanner.visible = false
+end sub
+
+' User confirmed "Skip to Next Episode" - from either the floating
+' banner (OK key) or the action-bar button in the overlay.
+sub performNextEpSkip()
+    if m.nextEpBanner <> invalid then m.nextEpBanner.visible = false
+    if m.nextEpTimer <> invalid then m.nextEpTimer.control = "stop"
+    m.nextEpActive = false
+    m.nextEpBannerShown = true
+    if m.overlay <> invalid and m.overlay.visible then hideOverlay()
+    saveProgress(true)
+    if not tryAutoAdvance() then
+        showOverlay()
+        m.status.text = "No next episode available."
+    end if
+end sub
+
 ' 5s timer fired. For outros we auto-advance to the next episode;
 ' for intros / recaps we kick off the 0.5s opacity fade and remember
 ' that the banner has been dismissed so we don't redraw on a stray
@@ -705,6 +784,11 @@ sub rebuildActionBar()
     if m.activeChapter <> invalid then
         skipLabel = chapterActionLabel(m.activeChapterKind)
         if skipLabel <> "" then labels.Push(skipLabel)
+    end if
+    ' Time-based next-ep button. Omit when an outro chapter is already
+    ' offering "Play Next Episode" to avoid a duplicate entry.
+    if m.nextEpActive and m.activeChapterKind <> "outro" then
+        labels.Push("Skip to Next Episode")
     end if
     for each l in m.baseActionLabels
         labels.Push(l)
@@ -872,6 +956,14 @@ sub showOverlay()
     m.skipBannerTimer.control = "stop"
     m.skipFadeAnim.control = "stop"
     m.skipCountdownAnim.control = "stop"
+    ' Same for the time-based next-ep banner. Stop its timer too so it
+    ' doesn't fire while the overlay is up; treat opening the overlay as
+    ' "banner shown" so the floating button doesn't reappear on close.
+    if m.nextEpBanner <> invalid then m.nextEpBanner.visible = false
+    if m.nextEpTimer <> invalid then
+        m.nextEpTimer.control = "stop"
+        m.nextEpBannerShown = true
+    end if
     m.actionBar.setFocus(true)
     m.openPanel = ""
 end sub
@@ -903,6 +995,10 @@ sub onActionBar()
     if label = "Skip Intro" or label = "Skip Recap" or label = "Play Next Episode" then
         hideOverlay()
         performSkip()
+        return
+    end if
+    if label = "Skip to Next Episode" then
+        performNextEpSkip()
         return
     end if
     if label = "Resume" then
@@ -1112,6 +1208,14 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             return true
         end if
         return true
+    end if
+    ' Time-based next-ep banner: OK fires the skip immediately.
+    ' BACK is not intercepted here so it still exits the player normally.
+    if m.nextEpBanner <> invalid and m.nextEpBanner.visible and not m.overlay.visible then
+        if key = "OK" then
+            performNextEpSkip()
+            return true
+        end if
     end if
     ' Outro countdown: BACK lets the user finish the credits (cancels
     ' the auto-advance, hides the banner, but keeps the chapter

@@ -59,6 +59,22 @@
                 fieldToInterp="skipCountdownFill.width" />
         </Animation>
 
+        <!-- Time-based "Skip to Next Episode" prompt. Appears 2 m 15 s
+             before the end of any TV episode that has a queued
+             successor, regardless of whether the resolver detected
+             chapter data (works on every mirror / host). The floating
+             banner hides after 10 s; the options-menu action bar keeps
+             an entry for the rest of the episode. -->
+        <Group id="nextEpBanner" translation="[1500, 936]" visible="false">
+            <Rectangle width="360" height="64" color="0xffffffff" opacity="0.85" />
+            <Rectangle translation="[2, 2]" width="356" height="60" color="0x141414f0" />
+            <Label translation="[20, 12]" width="320" height="36"
+                   text="Skip to Next Episode"
+                   font="font:MediumBoldSystemFont" color="0xffffffff"
+                   horizAlign="center" vertAlign="center" />
+        </Group>
+        <Timer id="nextEpTimer" duration="10.0" repeat="false" />
+
         <!-- "Loading next episode..." overlay used during in-place
              episode advance. Stays inside PlayerView so the user
              never bounces back to MirrorPicker. -->

@@ -31,6 +31,7 @@ sub init()
     m.seasonResumeBtn.observeField("buttonSelected", "onSeasonResumeSelected")
     m.epGrid.itemComponentName = "EpisodeItem"
     m.epGrid.observeField("itemSelected", "onEpisodeSelected")
+    m.epGrid.observeField("itemFocused", "onEpisodeFocused")
     ' itemFocused fires every time the highlighted season changes (left/right
     ' on the remote). itemSelected only fires on OK. Observing both lets the
     ' episode list refresh as the user scrolls and also drops focus into the
@@ -38,6 +39,14 @@ sub init()
     ' horizontally when there are more seasons than fit on screen.
     m.seasonRow.observeField("itemFocused", "onSeasonFocused")
     m.seasonRow.observeField("itemSelected", "onSeasonSelected")
+
+    ' Per-episode description lazy loader. Fetches the episode page in the
+    ' background when the user focuses an episode cell and caches the result
+    ' so each episode shows its own description instead of the series blurb.
+    m.epDescTask = invalid
+    m.epDescSeason = -1
+    m.epDescEpisode = -1
+    m.seriesDesc = ""
 
     m.actions.setFocus(true)
 
@@ -161,6 +170,7 @@ sub paintDetail()
     end if
 
     m.overviewNode.text = d.description
+    m.seriesDesc = d.description
 
     if d.cast.Count() > 0 then
         names = []
@@ -463,6 +473,15 @@ end sub
 sub selectSeason(idx as Integer)
     if m.detail = invalid or m.detail.seasons = invalid then return
     if idx < 0 or idx >= m.detail.seasons.Count() then return
+    ' Cancel any pending episode-description fetch from the previous season.
+    if m.epDescTask <> invalid then
+        m.epDescTask.unobserveField("result")
+        m.epDescTask.control = "STOP"
+        m.epDescTask = invalid
+    end if
+    m.epDescSeason = -1
+    m.epDescEpisode = -1
+    m.overviewNode.text = m.seriesDesc
     m.activeSeason = idx
     s = m.detail.seasons[idx]
     poster = ""
@@ -538,6 +557,91 @@ sub onEpisodeSelected()
     if idx < 0 or idx >= s.episodes.Count() then return
     ep = s.episodes[idx]
     openMirrorPicker(ep, 0)
+end sub
+
+' When the user highlights an episode cell, show its cached description
+' immediately (if loaded before) or start a background fetch. Falls back
+' to the series description while loading so the overview is never blank.
+sub onEpisodeFocused()
+    idx = m.epGrid.itemFocused
+    if idx = invalid or idx < 0 then return
+    if m.detail = invalid then return
+    s = m.detail.seasons[m.activeSeason]
+    if idx >= s.episodes.Count() then return
+    ep = s.episodes[idx]
+
+    cached = ep["epDesc"]
+    if cached <> invalid and cached <> "" then
+        m.overviewNode.text = cached
+        return
+    end if
+
+    m.overviewNode.text = m.seriesDesc
+
+    ' Don't re-launch the same fetch that's already in flight.
+    if m.epDescSeason = ep.season and m.epDescEpisode = ep.episode then return
+
+    if m.epDescTask <> invalid then
+        m.epDescTask.unobserveField("result")
+        m.epDescTask.control = "STOP"
+        m.epDescTask = invalid
+    end if
+    m.epDescSeason = ep.season
+    m.epDescEpisode = ep.episode
+
+    task = createObject("roSGNode", "EpDescTask")
+    task.observeField("result", "onEpDescResult")
+    task.slug = ep.slug
+    task.season = ep.season
+    task.episode = ep.episode
+    m.epDescTask = task
+    task.control = "RUN"
+end sub
+
+sub onEpDescResult()
+    if m.epDescTask = invalid then return
+    res = m.epDescTask.result
+    if res = invalid then return
+    desc = ""
+    if res.desc <> invalid then desc = res.desc
+    resSeason = 0
+    resEpisode = 0
+    if res.season <> invalid then resSeason = res.season
+    if res.episode <> invalid then resEpisode = res.episode
+
+    ' Discard results from a superseded fetch.
+    if resSeason <> m.epDescSeason or resEpisode <> m.epDescEpisode then return
+
+    ' Cache on the episode object so subsequent focus hits are instant.
+    if m.detail = invalid or m.detail.seasons = invalid then return
+    si = m.activeSeason
+    if si < 0 or si >= m.detail.seasons.Count() then return
+    s = m.detail.seasons[si]
+    for ei = 0 to s.episodes.Count() - 1
+        ep = s.episodes[ei]
+        if ep.season = resSeason and ep.episode = resEpisode then
+            ep["epDesc"] = desc
+            ' Also update the grid cell so the description travels with
+            ' the item if the user scrolls away and comes back.
+            cell = m.epGrid.content.getChild(ei)
+            if cell <> invalid then
+                if desc <> "" then cell.description = desc else cell.description = m.seriesDesc
+            end if
+            exit for
+        end if
+    end for
+
+    ' Update the overview label if the user is still on this episode.
+    focusIdx = m.epGrid.itemFocused
+    if focusIdx = invalid or focusIdx < 0 or focusIdx >= s.episodes.Count() then return
+    focusedEp = s.episodes[focusIdx]
+    if focusedEp.season = resSeason and focusedEp.episode = resEpisode then
+        if desc <> "" then
+            m.overviewNode.text = desc
+        else
+            m.overviewNode.text = m.seriesDesc
+        end if
+    end if
 end sub
 
 sub onPlay()
