@@ -40,12 +40,14 @@ sub init()
     m.seasonRow.observeField("itemFocused", "onSeasonFocused")
     m.seasonRow.observeField("itemSelected", "onSeasonSelected")
 
-    ' Per-episode description lazy loader. Fetches the episode page in the
-    ' background when the user focuses an episode cell and caches the result
-    ' so each episode shows its own description instead of the series blurb.
-    m.epDescTask = invalid
-    m.epDescSeason = -1
-    m.epDescEpisode = -1
+    ' Episode descriptions used to lazy-load from each episode's HydraHD
+    ' page via EpDescTask, but that page only returns the generic
+    ' "Available to Stream Now for free <Show> - sNeN Watch Now Free"
+    ' og:description (the "free tv" blurb). HydraHD doesn't publish a
+    ' real per-episode synopsis anywhere we can scrape, so we surface
+    ' the episode title (already parsed from the seasons list page) as
+    ' the description instead. m.seriesDesc remains the show-level
+    ' fallback for the top overview.
     m.seriesDesc = ""
 
     m.actions.setFocus(true)
@@ -473,21 +475,11 @@ end sub
 sub selectSeason(idx as Integer)
     if m.detail = invalid or m.detail.seasons = invalid then return
     if idx < 0 or idx >= m.detail.seasons.Count() then return
-    ' Cancel any pending episode-description fetch from the previous season.
-    if m.epDescTask <> invalid then
-        m.epDescTask.unobserveField("result")
-        m.epDescTask.control = "STOP"
-        m.epDescTask = invalid
-    end if
-    m.epDescSeason = -1
-    m.epDescEpisode = -1
     m.overviewNode.text = m.seriesDesc
     m.activeSeason = idx
     s = m.detail.seasons[idx]
     poster = ""
     if m.detail.poster <> invalid then poster = m.detail.poster
-    desc = ""
-    if m.detail.description <> invalid then desc = m.detail.description
 
     targetEpIdx = -1
     if m.seriesResume <> invalid and m.seriesResume.seasonIdx = idx then
@@ -503,7 +495,12 @@ sub selectSeason(idx as Integer)
         airDate = ""
         if ep.airDate <> invalid then airDate = ep.airDate
         cell.shortDescriptionLine1 = airDate
-        cell.description = desc
+        ' Use the episode title (parsed from the seasons-list page) as
+        ' the description. HydraHD doesn't surface a real per-episode
+        ' synopsis - the per-episode page only carries the generic
+        ' "free tv" og:description, which is what was rendering here
+        ' before.
+        cell.description = ep.name
         cell.HDPosterUrl = poster
         cell.SDPosterUrl = poster
         cell.id = ep.slug + "|" + ep.season.ToStr() + "|" + ep.episode.ToStr()
@@ -559,9 +556,10 @@ sub onEpisodeSelected()
     openMirrorPicker(ep, 0)
 end sub
 
-' When the user highlights an episode cell, show its cached description
-' immediately (if loaded before) or start a background fetch. Falls back
-' to the series description while loading so the overview is never blank.
+' When the user highlights an episode cell, show its title (with the air
+' date if known) in the overview node. We don't fetch anything - the
+' seasons-list page parsed at load time already carries everything
+' HydraHD makes available for each episode.
 sub onEpisodeFocused()
     idx = m.epGrid.itemFocused
     if idx = invalid or idx < 0 then return
@@ -570,78 +568,16 @@ sub onEpisodeFocused()
     if idx >= s.episodes.Count() then return
     ep = s.episodes[idx]
 
-    cached = ep["epDesc"]
-    if cached <> invalid and cached <> "" then
-        m.overviewNode.text = cached
-        return
-    end if
-
-    m.overviewNode.text = m.seriesDesc
-
-    ' Don't re-launch the same fetch that's already in flight.
-    if m.epDescSeason = ep.season and m.epDescEpisode = ep.episode then return
-
-    if m.epDescTask <> invalid then
-        m.epDescTask.unobserveField("result")
-        m.epDescTask.control = "STOP"
-        m.epDescTask = invalid
-    end if
-    m.epDescSeason = ep.season
-    m.epDescEpisode = ep.episode
-
-    task = createObject("roSGNode", "EpDescTask")
-    task.observeField("result", "onEpDescResult")
-    task.slug = ep.slug
-    task.season = ep.season
-    task.episode = ep.episode
-    m.epDescTask = task
-    task.control = "RUN"
-end sub
-
-sub onEpDescResult()
-    if m.epDescTask = invalid then return
-    res = m.epDescTask.result
-    if res = invalid then return
-    desc = ""
-    if res.desc <> invalid then desc = res.desc
-    resSeason = 0
-    resEpisode = 0
-    if res.season <> invalid then resSeason = res.season
-    if res.episode <> invalid then resEpisode = res.episode
-
-    ' Discard results from a superseded fetch.
-    if resSeason <> m.epDescSeason or resEpisode <> m.epDescEpisode then return
-
-    ' Cache on the episode object so subsequent focus hits are instant.
-    if m.detail = invalid or m.detail.seasons = invalid then return
-    si = m.activeSeason
-    if si < 0 or si >= m.detail.seasons.Count() then return
-    s = m.detail.seasons[si]
-    for ei = 0 to s.episodes.Count() - 1
-        ep = s.episodes[ei]
-        if ep.season = resSeason and ep.episode = resEpisode then
-            ep["epDesc"] = desc
-            ' Also update the grid cell so the description travels with
-            ' the item if the user scrolls away and comes back.
-            cell = m.epGrid.content.getChild(ei)
-            if cell <> invalid then
-                if desc <> "" then cell.description = desc else cell.description = m.seriesDesc
-            end if
-            exit for
-        end if
-    end for
-
-    ' Update the overview label if the user is still on this episode.
-    focusIdx = m.epGrid.itemFocused
-    if focusIdx = invalid or focusIdx < 0 or focusIdx >= s.episodes.Count() then return
-    focusedEp = s.episodes[focusIdx]
-    if focusedEp.season = resSeason and focusedEp.episode = resEpisode then
-        if desc <> "" then
-            m.overviewNode.text = desc
+    line = ep.name
+    if ep.airDate <> invalid and ep.airDate <> "" then
+        if line = "" then
+            line = ep.airDate
         else
-            m.overviewNode.text = m.seriesDesc
+            line = ep.airDate + " - " + line
         end if
     end if
+    if line = "" then line = m.seriesDesc
+    m.overviewNode.text = line
 end sub
 
 sub onPlay()

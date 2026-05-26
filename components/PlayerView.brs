@@ -271,6 +271,17 @@ sub startPlayback(url as String, fmt as String)
             })
         end for
         cn.subtitleTracks = tracks
+        ' Auto-pick an English track if one is present. Match on ISO code
+        ' or on the human-readable name so labels like "English",
+        ' "English - SDH", "English - eng(5)", "ENGLISH" etc. all qualify.
+        ' Plain "English" wins over SDH variants when both exist.
+        m.activeSubtitle = pickDefaultSubtitle(m.subtitles)
+        if m.activeSubtitle >= 0 then
+            m.video.subtitleTrack = m.subtitles[m.activeSubtitle].url
+        else
+            m.video.subtitleTrack = ""
+        end if
+    else
         m.activeSubtitle = -1
         m.video.subtitleTrack = ""
     end if
@@ -334,25 +345,35 @@ end function
 
 ' --- In-place episode advance ----------------------------------------
 '
-' Skip Credits / playback-finished on a TV show triggers an in-place
-' swap of the player's stream, instead of bouncing back through
-' MirrorPicker. We try the saved mirror first (most likely to work for
-' the next episode of the same show); if it fails or wasn't recorded,
-' we fetch the full server list and iterate through it auto-cascade
-' style. The user only sees a brief "Loading next episode..." card on
-' top of the (paused) Video node, never a different view.
+' Skip Credits / playback-finished / Skip-to-Next-Episode on a TV show
+' triggers an in-place swap of the player's stream, instead of bouncing
+' back through MirrorPicker. We fetch a fresh per-episode server list
+' for the new S/E (the previous episode's mirror link is for a
+' DIFFERENT episode and would replay it verbatim if reused), then
+' iterate auto-cascade style - preferring the user's prior host so the
+' same-host UX is preserved. The user only sees a brief "Loading next
+' episode..." card on top of the (paused) Video node, never a
+' different view.
 
 function startEpisodeAdvance(nextEp as Object, nextIdx as Integer) as Boolean
     a = m.top.args
     if a = invalid then return false
 
+    ' The current episode's mirrorLink/mirrorHost belong to the *previous*
+    ' episode - the iframe URL is episode-specific on HydraHD, so handing
+    ' it to ResolveTask as the embedUrl would just re-resolve and replay
+    ' the same stream. Keep the host as a preference so we can favor it
+    ' once the fresh server list arrives.
+    preferredHost = ""
+    if a.mirrorHost <> invalid then preferredHost = a.mirrorHost
+
     m.advance = {
-        ep:           nextEp
-        queueIdx:     nextIdx
-        mirrors:      invalid
-        triedHosts:   {}
-        activeMirror: invalid
-        savedTried:   false
+        ep:            nextEp
+        queueIdx:      nextIdx
+        mirrors:       invalid
+        triedHosts:    {}
+        activeMirror:  invalid
+        preferredHost: preferredHost
     }
 
     ' Tear down the floating banner state in case we got here via the
@@ -370,20 +391,8 @@ function startEpisodeAdvance(nextEp as Object, nextIdx as Integer) as Boolean
     m.advanceStatus.text = label
     m.advanceOverlay.visible = true
 
-    if a.mirrorLink <> invalid and a.mirrorLink <> "" then
-        savedMirror = {
-            host: ""
-            link: a.mirrorLink
-            name: ""
-        }
-        if a.mirrorHost <> invalid then savedMirror.host = a.mirrorHost
-        if a.mirrorName <> invalid then savedMirror.name = a.mirrorName
-        m.advance.savedTried = true
-        if savedMirror.host <> "" then m.advance.triedHosts[savedMirror.host] = true
-        startAdvanceResolve(savedMirror)
-        return true
-    end if
-
+    ' Always fetch a fresh per-episode server list for the new S/E.
+    ' advanceTryNextMirror() will pick the preferred host (if any) first.
     fetchAdvanceServers()
     return true
 end function
@@ -421,6 +430,22 @@ end sub
 
 function advanceTryNextMirror() as Boolean
     if m.advance = invalid or m.advance.mirrors = invalid then return false
+    ' First pass: prefer the host the user was already on. Same-host
+    ' playback tends to work for every episode of a given show, so this
+    ' minimizes the "Resolving..." latency on auto-advance.
+    pref = ""
+    if m.advance.preferredHost <> invalid then pref = LCase(m.advance.preferredHost)
+    if pref <> "" then
+        for i = 0 to m.advance.mirrors.Count() - 1
+            host = ""
+            if m.advance.mirrors[i].host <> invalid then host = m.advance.mirrors[i].host
+            if host <> "" and LCase(host) = pref and not m.advance.triedHosts.DoesExist(host) then
+                startAdvanceResolve(m.advance.mirrors[i])
+                return true
+            end if
+        end for
+    end if
+    ' Second pass: any untried mirror.
     for i = 0 to m.advance.mirrors.Count() - 1
         host = ""
         if m.advance.mirrors[i].host <> invalid then host = m.advance.mirrors[i].host
@@ -464,12 +489,6 @@ sub onAdvanceResolveResult()
     if res = invalid or res.url = invalid or res.url = "" then
         if m.advance.activeMirror <> invalid and m.advance.activeMirror.host <> invalid then
             W_RecordMirrorOutcome(m.advance.activeMirror.host, false)
-        end if
-        ' Saved-mirror was tried first without a server list; if it
-        ' failed we still need the full list to iterate.
-        if m.advance.mirrors = invalid then
-            fetchAdvanceServers()
-            return
         end if
         if not advanceTryNextMirror() then
             showAdvanceFailure("All mirrors failed for the next episode.")
@@ -1085,6 +1104,49 @@ sub onQualityChosen()
         end if
     end if
 end sub
+
+' Pick a default-on subtitle track. Prefer a plain "English" (ISO code
+' "en" with no SDH marker), then any English-coded track regardless of
+' label, then any track whose name starts with / contains "english"
+' (case-insensitive) for sources that left the language field blank.
+' Returns -1 when no English track is found, leaving subtitles off.
+function pickDefaultSubtitle(subs as Object) as Integer
+    if subs = invalid or subs.Count() = 0 then return -1
+    plainEn = -1
+    anyEn = -1
+    nameEn = -1
+    for i = 0 to subs.Count() - 1
+        s = subs[i]
+        if s = invalid then continue for
+        lang = ""
+        if s.language <> invalid then lang = LCase(s.language)
+        nm = ""
+        if s.name <> invalid then nm = LCase(s.name)
+        ' Skip hearing-impaired / SDH / CC variants when a vanilla
+        ' English track is available; users with the SDH preference can
+        ' switch to it from the chip list.
+        isSdh = Instr(1, nm, "sdh") > 0 or Instr(1, nm, "hearing") > 0 or Instr(1, nm, "[cc]") > 0
+        isEn = (lang = "en" or lang = "eng" or Left(lang, 3) = "en-")
+        if not isEn and Len(nm) > 0 then
+            ' Catch labels like "English", "English - SDH", "ENGLISH",
+            ' "english - eng(5)" when the language field was blank.
+            if Left(nm, 7) = "english" or Instr(1, nm, "english") > 0 then isEn = true
+        end if
+        if isEn then
+            if anyEn = -1 then anyEn = i
+            if not isSdh and plainEn = -1 then plainEn = i
+        else if Len(nm) > 0 and nameEn = -1 then
+            ' Defensive: if neither code nor "english" matched but the
+            ' name happens to start with "en" (rare - some sources
+            ' truncate). Keep this as the very last fallback.
+            if Left(nm, 2) = "en" then nameEn = i
+        end if
+    end for
+    if plainEn >= 0 then return plainEn
+    if anyEn >= 0 then return anyEn
+    if nameEn >= 0 then return nameEn
+    return -1
+end function
 
 sub renderCcChips()
     labels = ["Off"]
