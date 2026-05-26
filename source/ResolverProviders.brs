@@ -266,11 +266,15 @@ function RP_ResolveAirflix(embedUrl as String, refer as String, session as Objec
     if streams = invalid or type(streams) <> "roArray" or streams.Count() = 0 then return invalid
 
     ' Airflix serves subtitles in TWO separate lists: "subs" (usually just
-    ' English) and "default_subs" (all languages). The old code only read
-    ' default_subs, so shows with English-only in "subs" showed no CC
-    ' options at all, and shows that appeared in both lists auto-selected
-    ' a non-Latin language because it was first. Fix: merge all four
-    ' possible locations, deduplicate by URL, sort English first.
+    ' English) and "default_subs" (all languages on shows that have them -
+    ' Mandalorian, Rings of Power, etc.). Each entry looks like
+    '   {"lang":"English (SDH)","code":"en","url":"https://..."}
+    ' - `code` is the ISO 639-1 code, `lang` is the display label (which
+    ' can be "English (SDH)", "English - eng(5)", "Portuguese (Brazilian)",
+    ' etc.). Pre-fix this read `s.lang` as the code, so language matching
+    ' downstream (English-first sort, PlayerView auto-pick) all fell over.
+    ' Merge all four possible source keys, deduplicate by URL, sort
+    ' English first by ISO code.
     subs = []
     seenSubUrl = {}
     allRawSubs = []
@@ -285,14 +289,21 @@ function RP_ResolveAirflix(embedUrl as String, refer as String, session as Objec
             if surl = "" then continue for
             if seenSubUrl.DoesExist(surl) then continue for
             seenSubUrl[surl] = true
-            lang = "en"
-            if s.lang <> invalid then lang = LCase(s.lang)
+            ' ISO code: prefer `code` (vaplayer / airflix1 default_subs
+            ' shape), then `language`, then a 2-char prefix of `lang` as a
+            ' last resort (works when `lang` is the bare ISO like "en").
+            lang = ""
+            if s.code <> invalid then lang = LCase(s.code)
             if lang = "" and s.language <> invalid then lang = LCase(s.language)
+            if lang = "" and s.lang <> invalid and Len(s.lang) >= 2 then lang = LCase(Left(s.lang, 2))
+            if lang = "" then lang = "en"
+            ' Display name: prefer the full label (`lang`) so chips like
+            ' "English (SDH)" or "Portuguese (Brazilian)" stay legible.
             name = ""
             if s.label <> invalid then name = s.label
-            if name = "" then
-                if s.lang <> invalid then name = UCase(s.lang) else name = "EN"
-            end if
+            if name = "" and s.lang <> invalid then name = s.lang
+            if name = "" and s.language <> invalid then name = s.language
+            if name = "" then name = UCase(lang)
             allRawSubs.Push({ url: surl, language: lang, name: name })
         end for
     end for

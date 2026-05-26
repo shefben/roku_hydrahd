@@ -467,6 +467,53 @@ function HM_QueryOpenSubtitles(imdbId as String, kind as String, season as Integ
     return out
 end function
 
+' Merge two subtitle lists, preserving the order of `base` and appending
+' tracks from `extra` that aren't already there. Dedup keys are (url) and
+' (LCase(language) + "|" + LCase(name)) so identical entries collapse but
+' real variants ("English" vs "English (SDH)") survive as distinct chips.
+' Used by Resolver.R_EnrichResult to fold HLS-embedded + OpenSubtitles
+' tracks into whatever the upstream provider already returned.
+function HM_MergeSubtitles(base as Object, extra as Object) as Object
+    out = []
+    seenUrl = {}
+    seenKey = {}
+    if base = invalid or type(base) <> "roArray" then base = []
+    if extra = invalid or type(extra) <> "roArray" then extra = []
+    for each s in base
+        if type(s) <> "roAssociativeArray" then continue for
+        url = ""
+        if s.url <> invalid then url = s.url
+        if url = "" then continue for
+        if seenUrl.DoesExist(url) then continue for
+        lang = ""
+        if s.language <> invalid then lang = LCase(s.language)
+        nm = ""
+        if s.name <> invalid then nm = LCase(s.name)
+        key = lang + "|" + nm
+        if nm <> "" and seenKey.DoesExist(key) then continue for
+        seenUrl[url] = true
+        if nm <> "" then seenKey[key] = true
+        out.Push(s)
+    end for
+    for each s in extra
+        if type(s) <> "roAssociativeArray" then continue for
+        url = ""
+        if s.url <> invalid then url = s.url
+        if url = "" then continue for
+        if seenUrl.DoesExist(url) then continue for
+        lang = ""
+        if s.language <> invalid then lang = LCase(s.language)
+        nm = ""
+        if s.name <> invalid then nm = LCase(s.name)
+        key = lang + "|" + nm
+        if nm <> "" and seenKey.DoesExist(key) then continue for
+        seenUrl[url] = true
+        if nm <> "" then seenKey[key] = true
+        out.Push(s)
+    end for
+    return out
+end function
+
 ' --- Free skip-intro / outro times -----------------------------------
 '
 ' Three-tier cascade for the "the upstream stream had no DATERANGE"
