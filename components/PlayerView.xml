@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <component name="PlayerView" extends="Group">
     <interface>
-        <field id="args" type="assocarray" onChange="onArgs" />
+        <field id="args" type="assocarray" onChange="onArgs" alwaysNotify="true" />
         <field id="requestNav" type="assocarray" alwaysNotify="true" />
         <field id="loading" type="bool" alwaysNotify="true" />
     </interface>

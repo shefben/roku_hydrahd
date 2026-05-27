@@ -514,39 +514,51 @@ sub completeAdvance(res as Object)
     }
     if nextEp.slug <> invalid then epDict.slug = nextEp.slug
     if nextEp.name <> invalid then epDict.name = nextEp.name
-    a.episode = epDict
-    a.episodeQueueIndex = m.advance.queueIdx
-    a.startPosition = 0
-    a.url = res.url
-    a.streamFormat = res.streamFormat
-    a.qualities = res.qualities
-    a.subtitles = res.subtitles
+
+    ' Build a NEW args dict and assign it through the field setter.
+    ' SGNode assocarray field reads return a *copy*, not a live
+    ' reference, so the previous implementation - which mutated the
+    ' local `a` and called onArgs() manually - never propagated the
+    ' new url / episode / queueIndex back to m.top.args. onArgs then
+    ' read the stale field and replayed the just-finished episode.
+    ' Assigning a fresh AA is the same pattern MainScene/MirrorPicker
+    ' use for the initial PlayerView args, and it fires the onChange
+    ' observer (onArgs) which starts playback against the new stream.
+    newArgs = {}
+    for each k in a
+        newArgs[k] = a[k]
+    end for
+    newArgs.episode = epDict
+    newArgs.episodeQueueIndex = m.advance.queueIdx
+    newArgs.startPosition = 0
+    newArgs.url = res.url
+    newArgs.streamFormat = res.streamFormat
+    newArgs.qualities = res.qualities
+    newArgs.subtitles = res.subtitles
     referer = ""
     if res.referer <> invalid then referer = res.referer
     userAgent = ""
     if res.userAgent <> invalid then userAgent = res.userAgent
-    a.referer = referer
-    a.userAgent = userAgent
+    newArgs.referer = referer
+    newArgs.userAgent = userAgent
     if m.advance.activeMirror <> invalid then
-        if m.advance.activeMirror.host <> invalid then a.mirrorHost = m.advance.activeMirror.host
-        if m.advance.activeMirror.link <> invalid then a.mirrorLink = m.advance.activeMirror.link
-        if m.advance.activeMirror.name <> invalid then a.mirrorName = m.advance.activeMirror.name
+        if m.advance.activeMirror.host <> invalid then newArgs.mirrorHost = m.advance.activeMirror.host
+        if m.advance.activeMirror.link <> invalid then newArgs.mirrorLink = m.advance.activeMirror.link
+        if m.advance.activeMirror.name <> invalid then newArgs.mirrorName = m.advance.activeMirror.name
     end if
     if res.chapters <> invalid then
-        a.chapters = res.chapters
+        newArgs.chapters = res.chapters
     else
-        a.chapters = invalid
+        newArgs.chapters = invalid
     end if
     sub2 = "S" + epDict.season.ToStr() + "E" + epDict.episode.ToStr()
     if epDict.name <> "" then sub2 = sub2 + " - " + epDict.name
-    a.subtitle = sub2
+    newArgs.subtitle = sub2
 
+    print "[Player] advance complete - new episode S"; epDict.season.ToStr(); "E"; epDict.episode.ToStr(); " queueIdx="; newArgs.episodeQueueIndex
     m.advance = invalid
     m.advanceOverlay.visible = false
-    ' onArgs re-reads m.top.args end-to-end and starts playback with the
-    ' new stream. We mutated the dict in place, so calling onArgs picks
-    ' those changes up without firing the field observer.
-    onArgs()
+    m.top.args = newArgs
 end sub
 
 sub showAdvanceFailure(msg as String)
