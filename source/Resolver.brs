@@ -170,7 +170,7 @@ function R_DispatchByHost(embedUrl as String, refer as String, session as Object
 
     if Instr(1, host, "vidora.stream") > 0 then return RP_ResolveVidora(embedUrl, refer, session)
 
-    if Instr(1, host, "autoembed.cc") > 0 then return RP_ResolveAutoembed(embedUrl, refer, session)
+    if Instr(1, host, "autoembed") > 0 then return RP_ResolveAutoembed(embedUrl, refer, session)
 
     if Instr(1, host, "xpass.top") > 0 then return RP_ResolveXpass(embedUrl, refer, session)
 
@@ -294,10 +294,10 @@ function R_BuildFallbackCandidates(kind as String, tmdb as String, imdb as Strin
     end if
     if imdb <> "" then
         if isMovie then
-            out.Push("https://player.autoembed.cc/embed/movie/" + imdb)
+            out.Push("https://player.autoembed.co/embed/movie/" + imdb)
             out.Push("https://ythd.org/embed/" + imdb + "/")
         else
-            out.Push("https://player.autoembed.cc/embed/tv/" + imdb + "/" + season.ToStr() + "/" + episode.ToStr())
+            out.Push("https://player.autoembed.co/embed/tv/" + imdb + "/" + season.ToStr() + "/" + episode.ToStr())
             out.Push("https://ythd.org/embed/" + imdb + "/" + season.ToStr() + "-" + episode.ToStr() + "/")
         end if
     end if

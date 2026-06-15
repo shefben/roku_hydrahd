@@ -221,8 +221,9 @@ end function
 ' --- Phase 2: airflix1.com -------------------------------------------
 '
 ' Calls https://streamdata.vaplayer.ru/api.php?(tmdb|imdb)=<id>&type=<kind>
-' [&season=&episode=]. The endpoint requires brightpathsignals.com as both
-' Referer and Origin (vaplayer.ru rejects requests from any other origin).
+' [&season=&episode=]. The endpoint requires nextgencloudfabric.com as both
+' Referer and Origin (vaplayer.ru rejects requests from any other origin;
+' the previous brightpathsignals.com origin now 404s).
 ' Returns { status_code, data: { stream_urls: [ "...m3u8", ... ] }, default_subs: [...] }.
 ' Validates each candidate by GETing it and checking #EXTM3U prefix.
 ' Port of server.py:1753.
@@ -248,10 +249,16 @@ function RP_ResolveAirflix(embedUrl as String, refer as String, session as Objec
         apiUrl = apiUrl + "&season=" + season + "&episode=" + episode
     end if
 
-    apiReferer = "https://brightpathsignals.com/"
+    ' airflix1.com's player iframes nextgencloudfabric.com, which is now the
+    ' only Origin/Referer the vaplayer.ru stream API accepts - the old
+    ' brightpathsignals.com origin started returning HTTP 404 (verified
+    ' 2026-06: brightpathsignals/airflix1/no-referer -> 404, nextgencloudfabric
+    ' -> 200 with stream_urls). apiReferer also flows into the stream
+    ' validation GET below and the returned result envelope's referer.
+    apiReferer = "https://nextgencloudfabric.com/"
     res = HC_Get(session, apiUrl, {
         "Referer": apiReferer
-        "Origin": "https://brightpathsignals.com"
+        "Origin": "https://nextgencloudfabric.com"
     }, 8000)
     if res = invalid or res.body = "" then return invalid
 
@@ -343,8 +350,44 @@ end function
 ' Walks the parsed tree for any string containing .m3u8 / .mp4.
 ' Port of server.py:1631.
 
+' AES-256-CBC encrypt `plain` (PKCS7) with hex key/iv, return base64url
+' ciphertext. Ports vidrock's JS Fk(): CryptoJS.AES.encrypt(...).ciphertext
+' -> base64 -> base64url. Must call BOTH Process() and Final() - for a
+' single-block input Process() buffers and Final() emits the padded block.
+function RP_VidrockEncrypt(plain as String, keyHex as String, ivHex as String) as String
+    cipher = CreateObject("roEVPCipher")
+    rc = cipher.Setup(true, "aes-256-cbc", keyHex, ivHex, 1)   ' 1 = PKCS7 padding
+    if rc <> 0 then return ""
+    pt = CreateObject("roByteArray")
+    pt.FromAsciiString(plain)
+    full = CreateObject("roByteArray")
+    ct = cipher.Process(pt)
+    if ct <> invalid then
+        for i = 0 to ct.Count() - 1
+            full.Push(ct[i])
+        end for
+    end if
+    fin = cipher.Final()
+    if fin <> invalid then
+        for i = 0 to fin.Count() - 1
+            full.Push(fin[i])
+        end for
+    end if
+    if full.Count() = 0 then return ""
+    b64 = full.ToBase64String()
+    ' base64url: + -> - , / -> _ , strip trailing =
+    re1 = CreateObject("roRegex", "\+", "")
+    re2 = CreateObject("roRegex", "/", "")
+    re3 = CreateObject("roRegex", "=+$", "")
+    out = re1.ReplaceAll(b64, "-")
+    out = re2.ReplaceAll(out, "_")
+    out = re3.ReplaceAll(out, "")
+    return out
+end function
+
 function RP_ResolveVidrock(embedUrl as String, refer as String, session as Object) as Object
-    pathRe = CreateObject("roRegex", "/embed/(movie|tv)/(\d+|tt\d+)(?:/(\d+)/(\d+))?", "i")
+    ' HydraHD now serves /movie/<tmdb> (no /embed/); accept both forms.
+    pathRe = CreateObject("roRegex", "/(?:embed/)?(movie|tv)/(\d+|tt\d+)(?:/(\d+)/(\d+))?", "i")
     m = pathRe.match(embedUrl)
     if m = invalid or m.Count() < 3 then return invalid
     kind = m[1]
@@ -356,18 +399,32 @@ function RP_ResolveVidrock(embedUrl as String, refer as String, session as Objec
         episode = m[4]
     end if
 
-    apiOrigin = "https://vidrock.net"
+    ' Domain moved vidrock.net -> vidrock.ru (301; HC_Get doesn't update
+    ' finalUrl on redirect, so target .ru directly). The API id is now
+    ' AES-256-CBC(id) base64url'd - the old plaintext path returns
+    ' {"error":"Forbidden"}. key="x7k9mPqT2rWvY8zA5bC3nF6hJ2lK4mN9" (32B),
+    ' iv = first 16 bytes of the key.
+    apiOrigin = "https://vidrock.ru"
     if kind = "tv" and season <> "" and episode <> "" then
-        apiUrl = apiOrigin + "/api/tv/" + cid + "/" + season + "/" + episode
+        plain = cid + "_" + season + "_" + episode
     else
-        apiUrl = apiOrigin + "/api/movie/" + cid
+        plain = cid
+    end if
+    keyHex = "78376b396d5071543272577659387a41356243336e4636684a326c4b346d4e39"
+    ivHex  = "78376b396d5071543272577659387a41"
+    enc = RP_VidrockEncrypt(plain, keyHex, ivHex)
+    if enc = "" then return invalid
+    if kind = "tv" and season <> "" and episode <> "" then
+        apiUrl = apiOrigin + "/api/tv/" + enc
+    else
+        apiUrl = apiOrigin + "/api/movie/" + enc
     end if
 
     headers = {
-        "Referer": apiOrigin + "/embed/" + kind + "/" + cid
+        "Referer": apiOrigin + "/" + kind + "/" + cid
         "Origin": apiOrigin
         "Accept": "application/json, text/plain, */*"
-        "X-Requested-With": "XMLHttpRequest"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     }
 
     res = HC_Get(session, apiUrl, headers, 8000)
@@ -491,7 +548,7 @@ function RP_ResolveXpass(embedUrl as String, refer as String, session as Object)
     primaryRe = CreateObject("roRegex", chr(34) + "playlist" + chr(34) + "\s*:\s*" + chr(34) + "([^" + chr(34) + "]+)" + chr(34), "i")
     pm = primaryRe.match(html)
     if pm <> invalid and pm.Count() >= 2 then
-        candidates.Push({ label: "TIK primary", url: U_AbsUrl(pm[1], final) })
+        candidates.Push({ label: "TIK primary", url: RP_AbsUrl(pm[1], final) })
     end if
 
     backups = RP_ParseXpassBackups(html)
@@ -503,7 +560,7 @@ function RP_ResolveXpass(embedUrl as String, refer as String, session as Object)
             name = ""
             if entry.name <> invalid then name = entry.name
             if name = "" then name = "backup"
-            candidates.Push({ label: name, url: U_AbsUrl(url, final) })
+            candidates.Push({ label: name, url: RP_AbsUrl(url, final) })
         end for
     end if
 
@@ -541,7 +598,7 @@ function RP_ResolveXpass(embedUrl as String, refer as String, session as Object)
         if data = invalid or type(data) <> "roAssociativeArray" then continue for
         streamUrl = RP_XpassFirstSource(data)
         if streamUrl = "" then continue for
-        streamUrl = U_AbsUrl(streamUrl, playlistUrl)
+        streamUrl = RP_AbsUrl(streamUrl, playlistUrl)
 
         verify = HC_Get(session, streamUrl, { "Referer": final }, 6000)
         if verify = invalid or verify.body = "" then continue for
@@ -833,7 +890,9 @@ function RP_ResolveLookmovie(embedUrl as String, refer as String, session as Obj
         end for
     end if
 
-    order = ["hls4", "hls3", "hls2"]
+    ' hls4's master still validates but its variant is now ad-only tiktokcdn
+    ' image segments; hls3 carries the real MPEG-TS video. Prefer hls3.
+    order = ["hls3", "hls4", "hls2"]
     for each k in order
         u = links[k]
         if u = invalid or u = "" then continue for
@@ -867,9 +926,12 @@ function RP_ResolveVidora(embedUrl as String, refer as String, session as Object
     if page = invalid or page.body = "" then return invalid
     final = page.finalUrl
     if final = invalid or final = "" then final = embedUrl
-    refUrl = refer
-    if refUrl = "" then refUrl = final
-    return RP_ResolveJwplayerPage(page.body, final, refUrl, session)
+    ' vidora.stream's CDN (bx/box.netrocdn.site) strictly requires a
+    ' vidora.stream Referer; the inherited moviesapi/autoembed referer yields
+    ' HTTP 403 on the master.m3u8. Always use our own embed page URL (final)
+    ' as the referer for the JWPlayer source fetch AND the referer returned to
+    ' the Roku player (segments are validated the same way).
+    return RP_ResolveJwplayerPage(page.body, final, final, session)
 end function
 
 ' --- Phase 3: 2embed.cc ----------------------------------------------
@@ -969,7 +1031,7 @@ function RP_ResolveCloudnestra(embedUrl as String, refer as String, session as O
             hosts.Push(h)
         end for
     end if
-    if hosts.Count() = 0 then hosts.Push("tmstr1.cloudnestra.com")
+    if hosts.Count() = 0 then hosts.Push("tmstr1.cloudorchestranova.com")
 
     rawUrls = []
     splitRe = CreateObject("roRegex", "\s+or\s+", "i")
@@ -1066,21 +1128,71 @@ function RP_ResolveMoviesapi(embedUrl as String, refer as String, session as Obj
     return RP_ResolveJwplayerPage(page.body, final, refUrl, session)
 end function
 
-' --- Phase 3: autoembed.cc / player.autoembed.cc ---------------------
+' --- Phase 3: autoembed (.co) ----------------------------------------
 '
-' Same shape as moviesapi: thin shell that iframes vidsrc.xyz /
-' cloudnestra. Port of server.py:1739.
+' player.autoembed.cc is DEAD (NXDOMAIN). autoembed migrated to the .co TLD
+' and its player iframes nextgencloudfabric.com, which serves the stream from
+' streamdata.vaplayer.ru/api.php - the SAME backend as airflix1. The embed
+' page no longer carries inline stream URLs, so we hit that JSON API directly
+' (Referer https://nextgencloudfabric.com/, required by both the API and its
+' playlist CDNs) instead of walking iframes. Mirrors RP_ResolveAirflix.
 
 function RP_ResolveAutoembed(embedUrl as String, refer as String, session as Object) as Object
-    refUrl = refer
-    if refUrl = "" then refUrl = "https://hydrahd.ru/"
-    page = HC_Get(session, embedUrl, { "Referer": refUrl }, 8000)
-    if page = invalid or page.body = "" then return invalid
-    final = page.finalUrl
-    if final = invalid or final = "" then final = embedUrl
-    chain = R_FollowKnownIframes(page.body, final, refUrl, 0, session)
-    if chain <> invalid and chain.url <> invalid and chain.url <> "" then return chain
-    return RP_ResolveJwplayerPage(page.body, final, refUrl, session)
+    apiReferer = "https://nextgencloudfabric.com/"
+
+    pathRe = CreateObject("roRegex", "/embed/(movie|tv)/(tt\d+|\d+)(?:/(\d+)/(\d+))?", "i")
+    m = pathRe.match(embedUrl)
+    if m = invalid or m.Count() < 3 then return invalid
+    mediaType = m[1]
+    mediaId = m[2]
+    season = ""
+    episode = ""
+    if m.Count() >= 5 then
+        season = m[3]
+        episode = m[4]
+    end if
+
+    idParam = "tmdb"
+    if Left(mediaId, 2) = "tt" then idParam = "imdb"
+    apiUrl = "https://streamdata.vaplayer.ru/api.php?" + idParam + "=" + U_UrlEncode(mediaId) + "&type=" + mediaType
+    if mediaType = "tv" and season <> "" and episode <> "" then
+        apiUrl = apiUrl + "&season=" + season + "&episode=" + episode
+    end if
+
+    res = HC_Get(session, apiUrl, {
+        "Referer": apiReferer
+        "Origin": "https://nextgencloudfabric.com"
+    }, 8000)
+    if res = invalid or res.body = "" then return invalid
+
+    envelope = ParseJSON(res.body)
+    if envelope = invalid or type(envelope) <> "roAssociativeArray" then return invalid
+    sc = ""
+    if envelope.status_code <> invalid then sc = envelope.status_code.ToStr()
+    if sc <> "200" then return invalid
+    data = envelope.data
+    if data = invalid or type(data) <> "roAssociativeArray" then return invalid
+    streams = data.stream_urls
+    if streams = invalid or type(streams) <> "roArray" or streams.Count() = 0 then return invalid
+
+    for each streamUrl in streams
+        if type(streamUrl) <> "String" and type(streamUrl) <> "roString" then continue for
+        if streamUrl = "" then continue for
+        playlist = HC_Get(session, streamUrl, { "Referer": apiReferer }, 6000)
+        if playlist = invalid or playlist.body = "" then continue for
+        if Left(playlist.body, 7) <> "#EXTM3U" then continue for
+        return {
+            url: streamUrl
+            streamFormat: "hls"
+            qualities: []
+            subtitles: []
+            chapters: []
+            referer: apiReferer
+            userAgent: ""
+        }
+    end for
+
+    return invalid
 end function
 
 function RP_ResolveYthd(embedUrl as String, refer as String, session as Object) as Object
@@ -1090,11 +1202,20 @@ function RP_ResolveYthd(embedUrl as String, refer as String, session as Object) 
     if refer <> "" then headers["Referer"] = refer
     page = HC_Get(session, embedUrl, headers, 8000)
     if page = invalid or page.body = "" then return invalid
+    ' The cloudnestra RCP host migrated to cloudorchestranova.com (cloudnestra.com
+    ' has no A record now). Read the live host+hash from the embed page's
+    ' player_iframe so we never hit the dead host (and survive future renames).
+    ifrRe = CreateObject("roRegex", "player_iframe" + chr(34) + "\s+src=" + chr(34) + "//([^/" + chr(34) + "]+)/rcp/([^" + chr(34) + "]+)" + chr(34), "i")
+    im = ifrRe.match(page.body)
+    if im <> invalid and im.Count() >= 3 then
+        rcpUrl = "https://" + im[1] + "/rcp/" + im[2]
+        return RP_ResolveCloudnestra(rcpUrl, embedUrl, session)
+    end if
     re = CreateObject("roRegex", "data-hash=" + chr(34) + "([^" + chr(34) + "]+)" + chr(34), "i")
     m = re.match(page.body)
     if m = invalid or m.Count() < 2 then return invalid
     hash = m[1]
-    rcpUrl = "https://cloudnestra.com/rcp/" + hash
+    rcpUrl = "https://cloudorchestranova.com/rcp/" + hash
     return RP_ResolveCloudnestra(rcpUrl, embedUrl, session)
 end function
 
@@ -1133,9 +1254,11 @@ function RP_ResolveVidking(embedUrl as String, refer as String, session as Objec
         season = m[3]
         episode = m[4]
     end if
-    seedStr = RP_NowMillis()
-    seed# = B_StrToLong(seedStr)
-    return RP_VideasyFamilyResolve(kind, tmdb, season, episode, seed#, seedStr, session)
+    ' Vidking seeds the keystream with the TMDB id (live bundle: Ct(body,
+    ' tmdbId)), not the ms timestamp - the timestamp was only the old &_t=
+    ' nonce. Makes vidking identical to RP_ResolveVideasy.
+    seed# = B_StrToLong(tmdb)
+    return RP_VideasyFamilyResolve(kind, tmdb, season, episode, seed#, tmdb, session)
 end function
 
 function RP_ResolveVideasy(embedUrl as String, refer as String, session as Object) as Object
@@ -1159,7 +1282,7 @@ end function
 ' decimal form of the LCG seed - vidking uses ms timestamp, videasy
 ' uses tmdbId - and is also the value of the &_t= query param.
 function RP_VideasyFamilyResolve(kind as String, tmdb as String, season as String, episode as String, seed as LongInteger, seedStr as String, session as Object) as Object
-    metaUrl = "https://db.videasy.net/3/" + kind + "/" + tmdb + "?append_to_response=external_ids"
+    metaUrl = "https://db.videasy.to/3/" + kind + "/" + tmdb + "?append_to_response=external_ids"
     metaRes = HC_Get(session, metaUrl, {}, 6000)
     title = ""
     year = ""
@@ -1177,15 +1300,15 @@ function RP_VideasyFamilyResolve(kind as String, tmdb as String, season as Strin
         end if
     end if
 
-    providers = ["mb-flix", "cdn", "downloader2", "1movies"]
+    providers = ["mb-flix", "cdn", "downloader2"]   ' 1movies removed (api.videasy.to 404s it)
     apiHeaders = {
-        "Referer": "https://player.videasy.net/"
-        "Origin": "https://player.videasy.net"
+        "Referer": "https://player.videasy.to/"
+        "Origin": "https://player.videasy.to"
         "Accept": "*/*"
     }
 
     for each prov in providers
-        url = "https://api.videasy.net/" + prov + "/sources-with-title?title=" + U_UrlEncode(title) + "&mediaType=" + kind + "&year=" + U_UrlEncode(year)
+        url = "https://api.videasy.to/" + prov + "/sources-with-title?title=" + U_UrlEncode(title) + "&mediaType=" + kind + "&year=" + U_UrlEncode(year)
         if kind = "tv" then
             ep = "1"
             sn = "1"
@@ -1193,11 +1316,17 @@ function RP_VideasyFamilyResolve(kind as String, tmdb as String, season as Strin
             if season <> "" then sn = season
             url = url + "&episodeId=" + ep + "&seasonId=" + sn
         end if
-        url = url + "&tmdbId=" + tmdb + "&imdbId=" + U_UrlEncode(imdb) + "&_t=" + seedStr
+        url = url + "&tmdbId=" + tmdb + "&imdbId=" + U_UrlEncode(imdb)
 
         res = HC_Get(session, url, apiHeaders, 8000)
         if res = invalid or res.body = "" then continue for
 
+        ' NOTE (2026-06): api.videasy.to now returns ciphertext whose AES key
+        ' is derived by a browser-only WASM proof-of-work (player.videasy.to/
+        ' module.wasm). The LCG/RC4/AES-128 pipeline below no longer matches it,
+        ' so this decrypt currently fails and the provider is skipped cleanly,
+        ' falling through to a working mirror. Host/seed kept correct so it
+        ' resolves again if they drop the WASM gate or a decrypt proxy is added.
         plaintext = RP_VideasyDecrypt(U_Trim(res.body), seed)
         if plaintext = "" then continue for
 
@@ -1366,11 +1495,13 @@ function RP_ResolvePeachify(embedUrl as String, refer as String, session as Obje
         episode = m[4]
     end if
 
+    ' holly first: its up-1.eat-peach.sbs/m3u8-proxy HLS plays for generic
+    ' referers, whereas moviebox's cf-worker mp4-proxy 403s off-site.
     providers = [
-        { host: "uwu.eat-peach.sbs",  path: "moviebox" },
-        { host: "uwu.eat-peach.sbs",  path: "net" },
-        { host: "usa.eat-peach.sbs",  path: "multi" },
         { host: "usa.eat-peach.sbs",  path: "holly" },
+        { host: "uwu.eat-peach.sbs",  path: "moviebox" },
+        { host: "usa.eat-peach.sbs",  path: "multi" },
+        { host: "uwu.eat-peach.sbs",  path: "net" },
         { host: "usa.eat-peach.sbs",  path: "air" }
     ]
 
@@ -1434,9 +1565,20 @@ function RP_ResolvePeachify(embedUrl as String, refer as String, session as Obje
             end for
         end if
 
+        ' Peachify's holly/moviebox sources are extensionless worker proxies
+        ' (.../mp4-proxy or .../m3u8-proxy). U_StreamFormat only sniffs file
+        ' extensions, so an mp4 proxy would be mislabelled "hls" and fail to
+        ' play. Detect by substring instead.
+        pfFmt = U_StreamFormat(streamUrl)
+        lu = LCase(streamUrl)
+        if Instr(1, lu, "m3u8") > 0 then
+            pfFmt = "hls"
+        else if Instr(1, lu, "mp4") > 0 then
+            pfFmt = "mp4"
+        end if
         return {
             url: streamUrl
-            streamFormat: U_StreamFormat(streamUrl)
+            streamFormat: pfFmt
             qualities: []
             subtitles: subs
             chapters: []
@@ -1461,7 +1603,9 @@ function RP_PeachifyDecrypt(payload as String) as String
     if ivBytes.Count() <> 12 then return ""
     if tagBytes.Count() <> 16 then return ""
 
-    keyHex = "d8f2a1b5e9c470814f6b2c3a5d8e7f9c1a2b3c4d5e3f7a8b9cad1e2f3a4d5c6d"
+    ' Provider rotated its hardcoded AES-256-GCM key (verified 2026-06: old
+    ' d8f2... fails the GCM MAC on all 5 endpoints; this a8f2... decrypts them).
+    keyHex = "a8f2a1b5e9c470814f6b2c3a5d8e7f9c1a2b3c4d5e3f7a8b8cad1e2d0a4d5c5b"
     pt = AGD_Decrypt(keyHex, ivBytes, ctBytes, tagBytes)
     if pt = invalid then return ""
     return pt.ToAsciiString()
@@ -1477,7 +1621,14 @@ end function
 ' through to invalid since its key rotates too fast to chase.
 
 function RP_ResolvePrimesrc(embedUrl as String, refer as String, session as Object) as Object
-    return RP_ResolveGeneric(embedUrl, refer, session)
+    ' DEAD as of 2026-06: link resolution /api/v1/l is now behind a Cloudflare
+    ' MANAGED Turnstile challenge (HTTP 403 Cf-Mitigated: challenge) that a Roku
+    ' channel cannot solve, and the ungated /api/v1/s catalog returns only opaque
+    ' internal keys (never upstream host URLs). The embed page is an SPA shell
+    ' with no inline .m3u8/.mp4, so the old RP_ResolveGeneric delegation also
+    ' always failed after a wasted round-trip. Fail fast so the dispatcher falls
+    ' through cleanly to a working mirror.
+    return invalid
 end function
 
 ' --- Phase 4: Downstream file-host extractors -----------------------
