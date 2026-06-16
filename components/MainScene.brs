@@ -49,6 +49,11 @@ sub init()
         m.sideMenu.observeField("command", "onSideMenuCommand")
     end if
 
+    ' Voice / OS deep-link search: main.brs sets m.top.deepLink after the
+    ' scene shows; if it carries a search term we drop the user straight
+    ' into Search pre-filled.
+    m.top.observeField("deepLink", "onDeepLink")
+
     ' Exit-confirm overlay (Roku expects BACK on the home screen to exit
     ' or prompt, not silently toggle a drawer).
     m.exitDialog = m.top.findNode("exitDialog")
@@ -313,6 +318,19 @@ function navHasFocus() as Boolean
     end for
     return false
 end function
+
+sub onDeepLink()
+    dl = m.top.deepLink
+    if dl = invalid then return
+    term = ""
+    if dl.q <> invalid then term = dl.q
+    if term = "" and dl.query <> invalid then term = dl.query
+    if term = "" and dl.mediaType = "search" and dl.contentId <> invalid then term = dl.contentId
+    if term = "" then return
+    m.viewStack = []
+    pushView("SearchView", { query: term })
+    focusActiveChild()
+end sub
 
 sub showExitDialog()
     if m.exitDialog = invalid then

@@ -38,6 +38,15 @@ sub init()
     m.grid.itemComponentName = "PosterItem"
     m.grid.observeField("itemSelected", "onItemSelected")
 
+    ' Result type filter (All / Movies / TV). Filters the current result
+    ' set client-side so it applies to both live search and trending.
+    m.typeFilter = "all"
+    m.allItems = []
+    m.lastLabel = ""
+    m.typeToggle = m.top.findNode("typeToggle")
+    m.typeToggle.buttons = ["All", "Movies", "TV"]
+    m.typeToggle.observeField("buttonSelected", "onTypeSelected")
+
     m.timer = createObject("roSGNode", "Timer")
     m.timer.duration = 0.5
     m.timer.repeat = false
@@ -72,6 +81,21 @@ sub init()
     ' top nav) we bounce focus back to the keyboard - or to the grid if
     ' results exist and the user was last interacting with them.
     m.top.observeField("focusedChild", "onSelfFocusChanged")
+end sub
+
+' Deep-link / voice search: open pre-filled with a query and show results.
+sub onArgs()
+    a = m.top.args
+    if a = invalid then return
+    if a.query <> invalid and a.query <> "" then
+        if m.focusTimer <> invalid then m.focusTimer.control = "stop"
+        m.query = LCase(a.query)
+        refreshQueryDisplay()
+        m.lastQuery = ""
+        runQuery()
+        showResults()
+        m.grid.setFocus(true)
+    end if
 end sub
 
 ' --- Custom keyboard setup -----------------------------------------------
@@ -182,25 +206,9 @@ sub onTrendingResult()
     if Len(m.query) >= 2 then return   ' user started typing; ignore stale trending
     res = m.trendTask.result
     if res = invalid or res.items = invalid or res.items.Count() = 0 then return
-    m.items = res.items
-    root = createObject("roSGNode", "ContentNode")
-    for each item in m.items
-        cell = root.createChild("ContentNode")
-        cell.title = item.title
-        cell.HDPosterUrl = item.poster
-        cell.SDPosterUrl = item.poster
-        cell.shortDescriptionLine1 = item.rating
-        cell.shortDescriptionLine2 = item.year
-        cell.releaseDate = item.quality
-        cell.id = item.id
-        U_SetCellKind(cell, item.kind)
-        cell.url = item.href
-        U_SetCellPct(cell, W_GetProgressPct("", item.href, 0, 0))
-    end for
-    m.grid.content = root
-    m.empty.visible = false
-    m.resultTitle.text = "Trending now"
-    m.resultTitle.visible = true
+    m.allItems = res.items
+    m.lastLabel = "Trending now"
+    renderFiltered()
 end sub
 
 sub onDebounce()
@@ -231,7 +239,27 @@ sub onResult()
         return
     end if
     m.empty.visible = false
-    m.items = r.items
+    m.allItems = r.items
+    m.lastLabel = "Results"
+    renderFiltered()
+    ' Now that the user got real results, remember the query and
+    ' refresh the chip row so it's there next time they come back.
+    W_PushSearchQuery(m.lastQuery)
+    renderChips()
+end sub
+
+' Build the results grid from m.allItems, honoring the current type filter
+' (All / Movies / TV). Used by both live search and trending so the toggle
+' applies everywhere.
+sub renderFiltered()
+    if m.allItems = invalid then m.allItems = []
+    filtered = []
+    for each item in m.allItems
+        k = ""
+        if item.kind <> invalid then k = item.kind
+        if m.typeFilter = "all" or k = m.typeFilter then filtered.Push(item)
+    end for
+    m.items = filtered
     root = createObject("roSGNode", "ContentNode")
     for each item in m.items
         cell = root.createChild("ContentNode")
@@ -247,13 +275,35 @@ sub onResult()
         U_SetCellPct(cell, W_GetProgressPct("", item.href, 0, 0))
     end for
     m.grid.content = root
-    m.resultTitle.text = m.items.Count().ToStr() + " results"
-    m.resultTitle.visible = true
-    ' Now that the user got real results, remember the query and
-    ' refresh the chip row so it's there next time they come back.
-    W_PushSearchQuery(m.lastQuery)
-    renderChips()
+    if m.items.Count() = 0 then
+        m.empty.text = "No " + typeWord() + " in these results"
+        m.empty.visible = true
+        m.resultTitle.visible = false
+    else
+        m.empty.visible = false
+        m.resultTitle.text = m.lastLabel + " (" + m.items.Count().ToStr() + ")"
+        m.resultTitle.visible = true
+    end if
 end sub
+
+sub onTypeSelected()
+    idx = m.typeToggle.buttonSelected
+    if idx = 1 then
+        m.typeFilter = "movie"
+    else if idx = 2 then
+        m.typeFilter = "tv"
+    else
+        m.typeFilter = "all"
+    end if
+    renderFiltered()
+    m.typeToggle.setFocus(true)
+end sub
+
+function typeWord() as String
+    if m.typeFilter = "movie" then return "movies"
+    if m.typeFilter = "tv" then return "TV shows"
+    return "items"
+end function
 
 sub onItemSelected()
     idx = m.grid.itemSelected
@@ -468,6 +518,32 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         end if
 
         ' All non-edge moves: let MarkupGrid handle internal nav.
+        return false
+    end if
+
+    ' Type toggle (All / Movies / TV) sits above the results grid.
+    if m.typeToggle.isInFocusChain() then
+        if key = "down" then
+            if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then m.grid.setFocus(true)
+            return true
+        end if
+        if key = "left" then
+            showKeyboard()
+            focusKeyboard()
+            return true
+        end if
+        if key = "right" then return true   ' stay within the toggle
+        return false                          ' up bubbles to nav; OK handled by ButtonGroup
+    end if
+
+    ' UP from the top row of the results grid lands on the type toggle.
+    if key = "up" and m.grid.isInFocusChain() then
+        idx = m.grid.itemFocused
+        if idx = invalid then idx = 0
+        if idx < m.grid.numColumns then
+            m.typeToggle.setFocus(true)
+            return true
+        end if
         return false
     end if
 

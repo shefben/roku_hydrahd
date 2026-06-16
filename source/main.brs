@@ -10,8 +10,15 @@ sub Main(args as Dynamic)
     scene = screen.CreateScene("MainScene")
     screen.show()
 
-    if args <> invalid and args.contentId <> invalid then
-        scene.deepLink = args
+    ' Deep links: a specific title (contentId) OR a voice/OS search term
+    ' (mediaType="search", or a q/query arg). MainScene routes a search
+    ' term straight into the Search view pre-filled. Voice search itself
+    ' is an OS feature that requires the channel's Roku Search feed to be
+    ' configured on a published channel; this is the in-channel landing.
+    if args <> invalid then
+        if args.contentId <> invalid or args.mediaType <> invalid or args.q <> invalid or args.query <> invalid then
+            scene.deepLink = args
+        end if
     end if
 
     ' SideMenu's "Exit" button flips this field; we treat it like a
