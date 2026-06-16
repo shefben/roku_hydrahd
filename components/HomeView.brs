@@ -3,7 +3,13 @@
 sub init()
     m.rows = m.top.findNode("rows")
     m.empty = m.top.findNode("empty")
+    m.hero = m.top.findNode("hero")
+    m.heroBackdrop = m.top.findNode("heroBackdrop")
+    m.heroTitle = m.top.findNode("heroTitle")
+    m.heroMeta = m.top.findNode("heroMeta")
     m.rows.observeField("rowItemSelected", "onItemSelected")
+    ' Hero mirrors the focused tile.
+    m.rows.observeField("rowItemFocused", "onRowItemFocused")
     m.rows.itemComponentName = "PosterItem"
     m.rows.setFocus(true)
     ' Index of the Continue Watching row when it's present (-1 = absent).
@@ -26,6 +32,44 @@ sub init()
     m.task.control = "RUN"
 end sub
 
+' Update the hero spotlight to whatever tile is focused in the rows.
+sub onRowItemFocused()
+    sel = m.rows.rowItemFocused
+    if sel = invalid or sel.Count() < 2 then return
+    if m.rows.content = invalid then return
+    rowNode = m.rows.content.getChild(sel[0])
+    if rowNode = invalid then return
+    updateHero(rowNode.getChild(sel[1]))
+end sub
+
+sub updateHero(cell as Object)
+    if cell = invalid then return
+    poster = ""
+    if cell.HDPosterUrl <> invalid then poster = cell.HDPosterUrl
+    if poster <> "" then m.heroBackdrop.uri = U_TmdbImage(poster, "w1280")
+    if cell.title <> invalid then m.heroTitle.text = cell.title
+
+    parts = []
+    yr = cell.shortDescriptionLine2
+    if yr <> invalid and yr <> "" then parts.Push(yr)
+    rt = cell.shortDescriptionLine1
+    if rt <> invalid and rt <> "" then parts.Push("* " + rt)
+    q = cell.releaseDate
+    if q <> invalid and q <> "" and q <> "Resume" then parts.Push(q)
+    k = U_GetCellKind(cell)
+    if k = "tv" then
+        parts.Push("TV Series")
+    else if k = "movie" then
+        parts.Push("Movie")
+    end if
+    meta = ""
+    for i = 0 to parts.Count() - 1
+        if i > 0 then meta = meta + "   -   "
+        meta = meta + parts[i]
+    end for
+    m.heroMeta.text = meta
+end sub
+
 sub onSelfFocusChanged()
     fc = m.top.focusedChild
     if fc = invalid then return
@@ -42,6 +86,7 @@ sub onResult()
     bundle = m.task.result
     m.top.loading = false
     if bundle = invalid or bundle.rows = invalid or bundle.rows.Count() = 0 then
+        m.hero.visible = false
         m.empty.text = "Failed to load - press OK to retry, or * to search."
         m.empty.visible = true
         m.empty.focusable = true
@@ -128,8 +173,12 @@ sub onResult()
         end for
     end for
     m.rows.content = rootContent
+    m.hero.visible = true
+    m.empty.visible = false
     if rootContent.getChildCount() > 0 then
         m.rows.jumpToRowItem = [0, 0]
+        firstRow = rootContent.getChild(0)
+        if firstRow <> invalid and firstRow.getChildCount() > 0 then updateHero(firstRow.getChild(0))
     end if
     ' Re-grab focus now that there's actually something to focus on -
     ' but only if the user is still inside HomeView. If they UPed to
