@@ -48,6 +48,16 @@ sub init()
         m.sideMenu.observeField("command", "onSideMenuCommand")
     end if
 
+    ' Exit-confirm overlay (Roku expects BACK on the home screen to exit
+    ' or prompt, not silently toggle a drawer).
+    m.exitDialog = m.top.findNode("exitDialog")
+    m.exitChoices = m.top.findNode("exitChoices")
+    if m.exitChoices <> invalid then
+        m.exitChoices.buttons = ["Exit", "Cancel"]
+        m.exitChoices.observeField("buttonSelected", "onExitChoice")
+    end if
+    m.contentFade = m.top.findNode("contentFade")
+
     m.activeNavIndex = 0
     m.viewStack = []
     m.activeChild = invalid
@@ -110,6 +120,29 @@ sub pushView(viewName as String, args as Dynamic)
     m.activeChild = child
     m.viewStack.Push({ name: viewName, args: args })
     setChromeForView(viewName)
+    updateActiveNav()
+    ' Quick fade-in so view switches read as a transition, not a hard cut.
+    if m.contentFade <> invalid then
+        m.contentHost.opacity = 0.0
+        m.contentFade.control = "stop"
+        m.contentFade.control = "start"
+    end if
+end sub
+
+' Highlight the nav button for the section the user is currently in (red
+' brand accent) vs the others (muted), so there's a persistent "you are
+' here" cue independent of which control has focus.
+sub updateActiveNav()
+    if m.navButtons = invalid then return
+    for i = 0 to m.navButtons.Count() - 1
+        if m.navButtons[i] = invalid then
+            ' skip
+        else if i = m.activeNavIndex then
+            m.navButtons[i].textColor = "0xff5252ff"
+        else
+            m.navButtons[i].textColor = "0xd8d8d8ff"
+        end if
+    end for
 end sub
 
 sub setChromeForView(viewName as String)
@@ -280,30 +313,68 @@ function navHasFocus() as Boolean
     return false
 end function
 
+sub showExitDialog()
+    if m.exitDialog = invalid then
+        ' No dialog available - just exit.
+        m.top.exitRequested = true
+        return
+    end if
+    m.exitDialog.visible = true
+    if m.exitChoices <> invalid then
+        m.exitChoices.setFocus(true)
+        m.exitChoices.focusButton = 1   ' default highlight on Cancel
+    end if
+end sub
+
+sub closeExitDialog()
+    if m.exitDialog <> invalid then m.exitDialog.visible = false
+    focusActiveChild()
+end sub
+
+sub onExitChoice()
+    if m.exitChoices = invalid then return
+    idx = m.exitChoices.buttonSelected
+    if idx = 0 then
+        m.top.exitRequested = true
+    else
+        closeExitDialog()
+    end if
+end sub
+
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
+
+    ' Exit-confirm overlay traps input while visible.
+    if m.exitDialog <> invalid and m.exitDialog.visible then
+        if key = "back" then
+            closeExitDialog()
+            return true
+        end if
+        return false   ' let the ButtonGroup handle left/right/OK
+    end if
 
     ' OPTIONS (`*` on the Roku remote) is reserved for the active
     ' view: poster grids use it to toggle favorites, DetailsView uses
     ' it as a shortcut for Save-to-List. We don't intercept it here.
 
     if key = "back" then
+        ' Standard Roku back semantics:
+        '   - inside a subview (Details, MirrorPicker, ...) -> pop it
+        '   - on a non-Home root tab -> return to Home
+        '   - on Home root -> confirm exit
+        ' The side drawer is still reachable via LEFT on the leftmost nav
+        ' button and LEFT from a grid's first column, so BACK no longer
+        ' needs to double as the menu toggle.
         if m.viewStack.Count() > 1 then
             popView()
             return true
         end if
-        ' On a root view (Home, Movies, etc.) BACK has no view to pop,
-        ' so it doubles as the menu trigger. This is the most
-        ' discoverable shortcut - LEFT-on-navHome works too but the
-        ' user has to UP to nav first; BACK works from anywhere.
-        ' Use the field-based trigger (expandRequest) instead of
-        ' callFunc("openMenu") - callFunc has bitten us before with
-        ' silent failures around parameter arity.
-        if m.sideMenu <> invalid and m.sideMenu.visible then
-            m.sideMenu.expandRequest = true
+        if m.activeNavIndex > 0 then
+            switchToTab(m.navTabs[0].id)
             return true
         end if
-        return false
+        showExitDialog()
+        return true
     end if
 
     ' Nav-bar key handling: left/right between buttons, down into content.
