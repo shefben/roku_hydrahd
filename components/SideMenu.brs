@@ -95,9 +95,10 @@ end function
 function collapseSilent(_unused as Dynamic) as Object
     if not m.expanded then return invalid
     m.expanded = false
+    ' Snap straight off-screen (no animation) - used when the parent is
+    ' switching tabs/tearing down and doesn't want a lingering slide.
     m.expandAnim.control = "stop"
-    m.panel.translation = [-360, 0]
-    m.panel.visible = false
+    m.panel.translation = [-460, 0]
     return invalid
 end function
 
@@ -116,11 +117,7 @@ end sub
 sub expand()
     if m.expanded then return
     m.expanded = true
-    ' Make the panel visible only for the duration it's on-screen. It's
-    ' visible=false while collapsed so its (auto-sized) buttons can never
-    ' peek past the left edge.
-    m.panel.visible = true
-    m.expandInterp.keyValue = [[-360, 0], [0, 0]]
+    m.expandInterp.keyValue = [[-460, 0], [0, 0]]
     m.expandAnim.control = "stop"
     m.expandAnim.control = "start"
     ' Land focus on the first button (the close arrow) so the user
@@ -135,12 +132,11 @@ end sub
 sub collapse()
     if not m.expanded then return
     m.expanded = false
-    ' Snap the panel off-screen and hide it. We don't animate the
-    ' slide-out: hiding immediately is what guarantees the panel never
-    ' lingers as a peeking sliver on the left edge.
+    ' Animate the panel back off-screen (to -460, fully hidden). Symmetric
+    ' with expand() so the drawer slides shut instead of snapping.
+    m.expandInterp.keyValue = [[0, 0], [-460, 0]]
     m.expandAnim.control = "stop"
-    m.panel.translation = [-360, 0]
-    m.panel.visible = false
+    m.expandAnim.control = "start"
     m.stripToggle.setFocus(true)
     ' Tell the parent to put focus back on its grid - never leave
     ' the user stranded after a collapse.
