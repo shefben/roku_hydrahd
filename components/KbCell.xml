@@ -47,8 +47,11 @@
              key reads as its own button regardless of focus. -->
         <Rectangle id="frame" width="70" height="60" color="0x202028ff" />
         <Rectangle id="bg" translation="[2, 2]" width="66" height="56" color="0x484858ff" />
+        <!-- SmallBold so the 3-char keys (DEL / CLR / GO) fit the 70px cell
+             instead of ellipsizing to "D..." / "C...". Single letters stay
+             perfectly legible at this size. -->
         <Label id="label" translation="[0, 0]" width="70" height="60" text=""
                horizAlign="center" vertAlign="center"
-               font="font:MediumBoldSystemFont" color="0xeeeeeeff" />
+               font="font:SmallBoldSystemFont" color="0xeeeeeeff" />
     </children>
 </component>

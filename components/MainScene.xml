@@ -14,6 +14,14 @@
 
     <children>
         <Rectangle id="bg" color="0x0a0a0aff" width="1920" height="1080" />
+        <!-- Subtle brand-tinted gradient so the screen isn't a flat slab. -->
+        <Poster id="bgGradient" uri="pkg:/images/bg_gradient.png" width="1920" height="1080" loadDisplayMode="scaleToFill" />
+
+        <!-- Header band frames the nav so it reads as a real top bar instead
+             of buttons floating on black. Thin red accent line underneath
+             ties it to the HydraHD brand color and separates it from content. -->
+        <Rectangle id="headerBar" color="0x161616ff" width="1920" height="104" />
+        <Rectangle id="headerAccent" translation="[0, 104]" width="1920" height="3" color="0xff2424ff" />
 
         <LayoutGroup id="topBar" translation="[60, 30]" layoutDirection="horiz" itemSpacings="[20]" vertAlignment="center">
             <Label id="logo" text="HydraHD" font="font:LargeBoldSystemFont" color="0xff2424ff" />

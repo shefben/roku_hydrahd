@@ -88,6 +88,13 @@ function HA_ParseCards(html as String) as Object
     re = CreateObject("roRegex", "<a[^>]+class=" + chr(34) + "hthis" + chr(34) + "[^>]+href=" + chr(34) + "([^" + chr(34) + "]+)" + chr(34) + "[^>]+title=" + chr(34) + "([^" + chr(34) + "]*)" + chr(34) + "[^>]*>(.*?)</a>", "is")
     matches = re.matchAll(html)
     if matches = invalid then return out
+    ' Title cleanup (compiled once). The /movies and /tv-shows list pages
+    ' prefix every card title with "Stream " / "Watch " and suffix it with
+    ' " Online Free ..." (mixed case), which rendered as "Stream I Did..."
+    ' on the grid. The home/index page omits the prefix, so strip both
+    ' case-insensitively to get a clean, consistent title everywhere.
+    streamRe = CreateObject("roRegex", "^\s*(?:stream|watch)\s+", "i")
+    onlineRe = CreateObject("roRegex", "\s+online\b.*$", "i")
     for each mt in matches
         href = U_Trim(mt[1])
         title = U_HtmlDecode(mt[2])
@@ -114,8 +121,8 @@ function HA_ParseCards(html as String) as Object
             year = U_FirstMatch(inner, ">\s*(\d{4})\s*<")
             rating = U_FirstMatch(inner, "fa-star[^>]*></i>\s*([0-9.]+)")
             quality = U_FirstMatch(inner, ">\s*(HD|TS|CAM|SD|4K)\s*<")
-            cleanTitle = title.Replace(" online free", "")
-            cleanTitle = cleanTitle.Replace("Watch ", "")
+            cleanTitle = streamRe.replace(title, "")
+            cleanTitle = onlineRe.replace(cleanTitle, "")
             cleanTitle = U_Trim(cleanTitle)
 
             item = {

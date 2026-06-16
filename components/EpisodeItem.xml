@@ -29,7 +29,11 @@
             m.title.text = c.title
             m.epnum.text = c.shortDescriptionLine2
             m.airdate.text = c.shortDescriptionLine1
-            if c.description <> invalid then
+            ' Only show a description when it adds information. HydraHD has
+            ' no real per-episode synopsis, so the source often sets
+            ' description = title; rendering both stacked the same text
+            ' twice on the row. Suppress it unless it differs from title.
+            if c.description <> invalid and c.description <> "" and c.description <> c.title then
                 m.desc.text = c.description
             else
                 m.desc.text = ""

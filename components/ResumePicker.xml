@@ -31,9 +31,13 @@
                      layoutDirection="vert" itemSpacings="[16]"
                      minWidth="640" />
 
-        <Label id="status" translation="[120, 940]" text=""
+        <!-- Footer kept inside the contentHost-visible area: this view is a
+             child of contentHost (offset +110), so y here is +110 on screen.
+             y=920 -> screen 1030 (status just above it). The old 940/990
+             pushed the hint to screen ~1100, off the bottom edge. -->
+        <Label id="status" translation="[120, 872]" text=""
                font="font:SmallSystemFont" color="0xffd24aff" width="1680" maxLines="1" />
-        <Label id="hint" translation="[120, 990]"
+        <Label id="hint" translation="[120, 920]"
                text="OK to select  -  BACK to cancel"
                font="font:SmallestSystemFont" color="0x808080ff" />
     </children>

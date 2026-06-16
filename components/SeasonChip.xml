@@ -31,7 +31,9 @@
     </script>
     <children>
         <Rectangle id="bg" width="170" height="60" color="0x232323ff" />
-        <Label id="label" translation="[12, 18]" width="146" height="24" maxLines="1" text=""
-               font="font:MediumBoldSystemFont" color="0xc8c8c8ff" horizAlign="center" />
+        <!-- SmallBold + full-width label so "Season 10" fits instead of
+             ellipsizing to "Seaso..." (every chip looked identical before). -->
+        <Label id="label" translation="[6, 0]" width="158" height="60" maxLines="1" text=""
+               font="font:SmallBoldSystemFont" color="0xc8c8c8ff" horizAlign="center" vertAlign="center" />
     </children>
 </component>

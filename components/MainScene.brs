@@ -11,6 +11,8 @@ sub init()
 
     m.contentHost = m.top.findNode("contentHost")
     m.topBar = m.top.findNode("topBar")
+    m.headerBar = m.top.findNode("headerBar")
+    m.headerAccent = m.top.findNode("headerAccent")
     m.hint = m.top.findNode("hint")
     m.loadingBg = m.top.findNode("loadingBg")
     m.loadingGroup = m.top.findNode("loadingGroup")
@@ -116,7 +118,17 @@ sub setChromeForView(viewName as String)
     ' Also hide the global sidebar strip on the player.
     isPlayer = (viewName = "PlayerView")
     m.topBar.visible = not isPlayer
-    m.hint.visible = not isPlayer
+    if m.headerBar <> invalid then m.headerBar.visible = not isPlayer
+    if m.headerAccent <> invalid then m.headerAccent.visible = not isPlayer
+    ' The global footer hint ("OK to select - BACK for menu - UP for top
+    ' bar - * to favorite") only describes the browse grids. Detail /
+    ' picker / search / settings views render their OWN footer inside
+    ' contentHost (which is offset +110), so leaving the global hint on
+    ' would stack two hint lines on top of each other near y=1030 (and the
+    ' TV episode grid would collide with it too). Show the global hint only
+    ' where it's the correct, only footer.
+    usesGlobalHint = (viewName = "HomeView" or viewName = "ListView" or viewName = "FavoritesView")
+    m.hint.visible = usesGlobalHint
     if m.sideMenu <> invalid then m.sideMenu.visible = not isPlayer
     if isPlayer then
         m.contentHost.translation = [0, 0]

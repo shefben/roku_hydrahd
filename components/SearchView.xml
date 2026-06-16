@@ -55,8 +55,8 @@
                             itemComponentName="KbCell" />
 
                 <Label id="kbHint" translation="[0, 430]"
-                       text="OK to type  -  RIGHT to view results  -  UP for recent searches"
-                       font="font:SmallSystemFont" color="0x808080ff" width="754" />
+                       text="OK to type  -  RIGHT for results  -  UP for recent"
+                       font="font:SmallestSystemFont" color="0x808080ff" width="800" />
             </Group>
 
             <Group id="gridColumn" translation="[854, 70]">
