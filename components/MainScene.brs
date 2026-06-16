@@ -32,7 +32,8 @@ sub init()
     ' was pushed off the visible 1920px row, so we route it through the
     ' drawer's "Options" entry instead.
     m.offBarTabs = [
-        { id: "navSettings", view: "SettingsView",  args: invalid }
+        { id: "navSettings", view: "SettingsView",  args: invalid },
+        { id: "navGenres",   view: "GenresView",    args: invalid }
     ]
 
     m.navButtons = []

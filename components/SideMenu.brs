@@ -22,13 +22,14 @@ sub init()
     m.expanded = false
     ' Action codes parallel to the buttons array; index 0 closes the
     ' drawer, the rest map to MainScene nav tabs (or "exit").
-    m.actions = ["close", "search", "favorites", "movies", "tv", "settings", "home", "exit"]
+    m.actions = ["close", "search", "favorites", "movies", "tv", "genres", "settings", "home", "exit"]
     m.menuBg.buttons = [
         "< Close",
         "Search",
         "Favorites",
         "Browse Movies",
         "Browse TV Shows",
+        "Browse Genres",
         "Options",
         "Home",
         "Exit"
@@ -42,6 +43,7 @@ sub init()
         favorites: "navMyList"
         movies:    "navMovies"
         tv:        "navTv"
+        genres:    "navGenres"
         settings:  "navSettings"
         home:      "navHome"
     }

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="GenresView" extends="Group">
+    <interface>
+        <field id="args" type="assocarray" />
+        <field id="requestNav" type="assocarray" alwaysNotify="true" />
+        <field id="loading" type="bool" alwaysNotify="true" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/GenresView.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+
+    <children>
+        <Label translation="[60, 10]" text="Browse by Genre" font="font:LargeBoldSystemFont" color="0xffffffff" />
+        <MarkupGrid id="grid"
+                    translation="[60, 80]"
+                    itemSize="[300, 120]"
+                    numColumns="5"
+                    numRows="4"
+                    itemSpacing="[16, 16]"
+                    vertFocusAnimationStyle="floatingFocus"
+                    drawFocusFeedback="true"
+                    drawFocusFeedbackOnTop="true"
+                    itemComponentName="GenreCard" />
+    </children>
+</component>
