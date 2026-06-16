@@ -12,4 +12,5 @@
     <script type="text/brightscript" uri="pkg:/components/tasks/DetailsTask.brs" />
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
     <script type="text/brightscript" uri="pkg:/source/HydraApi.brs" />
+    <script type="text/brightscript" uri="pkg:/source/TmdbApi.brs" />
 </component>

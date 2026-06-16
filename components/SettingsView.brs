@@ -18,6 +18,11 @@ sub init()
     m.baseRow.buttons = ["Use hydrahd.ru", "Edit URL"]
     m.baseRow.observeField("buttonSelected", "onBaseRowSelected")
 
+    m.tmdbValue = m.top.findNode("tmdbValue")
+    m.tmdbRow = m.top.findNode("tmdbRow")
+    m.tmdbRow.buttons = ["Set Key...", "Clear"]
+    m.tmdbRow.observeField("buttonSelected", "onTmdbRowSelected")
+
     m.inChannelValue = m.top.findNode("inChannelValue")
     m.inChannelRow = m.top.findNode("inChannelRow")
     m.inChannelRow.buttons = ["Off", "On"]
@@ -45,7 +50,7 @@ sub init()
     m.urlActionsRow.buttons = ["Save", "Cancel"]
     m.urlActionsRow.observeField("buttonSelected", "onUrlActionsSelected")
 
-    m.rowOrder = [m.baseRow, m.inChannelRow, m.resolverRow, m.ccSizeRow, m.ccColorRow, m.ccBgRow]
+    m.rowOrder = [m.baseRow, m.tmdbRow, m.inChannelRow, m.resolverRow, m.ccSizeRow, m.ccColorRow, m.ccBgRow]
     m.currentRow = 0
 
     m.editTarget = ""
@@ -78,6 +83,14 @@ sub refresh()
     r = U_PrefDefault("resolverUrl", U_DefaultResolverUrl())
     if r = "" then r = "(not set - falls back to best-effort scrape)"
     m.resolverValue.text = r
+    tk = U_PrefDefault("tmdbKey", "")
+    if tk = "" then
+        m.tmdbValue.text = "(not set - showing HydraHD info only)"
+        m.tmdbValue.color = "0xc8c8c8ff"
+    else
+        m.tmdbValue.text = "Key set (ends ..." + Right(tk, 4) + ") - rich metadata on"
+        m.tmdbValue.color = "0x9affa0ff"
+    end if
     if U_PrefDefault("inChannelResolve", true) then
         m.inChannelValue.text = "Currently: ON - try resolving every mirror in-channel first."
         m.inChannelValue.color = "0x9affa0ff"
@@ -105,6 +118,16 @@ sub onBaseRowSelected()
         refresh()
     else if idx = 1 then
         openUrlEditor("baseUrl", "Edit base URL", U_PrefDefault("baseUrl", "https://hydrahd.ru"))
+    end if
+end sub
+
+sub onTmdbRowSelected()
+    idx = m.tmdbRow.buttonSelected
+    if idx = 0 then
+        openUrlEditor("tmdbKey", "Enter TMDB v3 API key (themoviedb.org -> Settings -> API)", U_PrefDefault("tmdbKey", ""))
+    else if idx = 1 then
+        U_PrefSet("tmdbKey", "")
+        refresh()
     end if
 end sub
 

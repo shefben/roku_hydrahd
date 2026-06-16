@@ -22,5 +22,9 @@ sub doWork()
     else
         d = HA_FetchMovieDetails(href, m.top.id)
     end if
+    ' Overlay real synopsis / rating / runtime / genres / cast / backdrop
+    ' from TMDB when a key is configured. No-op (returns d unchanged) when
+    ' TMDB is disabled or the lookup fails, so HydraHD data still shows.
+    d = TMDB_Enrich(d)
     m.top.result = { detail: d }
 end sub
