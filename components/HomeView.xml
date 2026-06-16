@@ -17,8 +17,11 @@
              title + meta update on every move), so it reads as a premium
              "featured" banner without adding a separate focus stop. -->
         <Group id="hero">
+            <!-- scaleToZoom fills the wide banner while preserving the
+                 image's aspect ratio (crops the excess) instead of
+                 stretching a portrait poster into a landscape band. -->
             <Poster id="heroBackdrop" translation="[0, 0]" width="1920" height="430"
-                    loadDisplayMode="scaleToFill" failedBitmapUri="pkg:/images/placeholder.png" />
+                    loadDisplayMode="scaleToZoom" failedBitmapUri="pkg:/images/placeholder.png" />
             <Poster id="heroScrim" translation="[0, 0]" width="1920" height="430"
                     uri="pkg:/images/hero_scrim.png" loadDisplayMode="scaleToFill" />
             <Label id="heroTitle" translation="[70, 250]" width="1160" maxLines="2"
