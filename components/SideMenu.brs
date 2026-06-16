@@ -49,12 +49,16 @@ sub init()
 end sub
 
 sub updateStripVisual(focused as Boolean)
+    ' The collapsed strip is fully hidden until the user actually reaches
+    ' it (or the drawer is expanding). Showing a permanent 6px sliver was
+    ' read as a rendering glitch ("rail slightly visible before you
+    ' navigate to it"). Only light it up when it holds focus.
     if focused then
         m.strip.opacity = 1.0
         m.stripChevron.opacity = 1.0
     else
-        m.strip.opacity = 0.3
-        m.stripChevron.opacity = 0.4
+        m.strip.opacity = 0.0
+        m.stripChevron.opacity = 0.0
     end if
 end sub
 
@@ -91,9 +95,9 @@ end function
 function collapseSilent(_unused as Dynamic) as Object
     if not m.expanded then return invalid
     m.expanded = false
-    m.expandInterp.keyValue = [[0, 0], [-280, 0]]
     m.expandAnim.control = "stop"
-    m.expandAnim.control = "start"
+    m.panel.translation = [-360, 0]
+    m.panel.visible = false
     return invalid
 end function
 
@@ -112,7 +116,11 @@ end sub
 sub expand()
     if m.expanded then return
     m.expanded = true
-    m.expandInterp.keyValue = [[-280, 0], [0, 0]]
+    ' Make the panel visible only for the duration it's on-screen. It's
+    ' visible=false while collapsed so its (auto-sized) buttons can never
+    ' peek past the left edge.
+    m.panel.visible = true
+    m.expandInterp.keyValue = [[-360, 0], [0, 0]]
     m.expandAnim.control = "stop"
     m.expandAnim.control = "start"
     ' Land focus on the first button (the close arrow) so the user
@@ -127,12 +135,15 @@ end sub
 sub collapse()
     if not m.expanded then return
     m.expanded = false
-    m.expandInterp.keyValue = [[0, 0], [-280, 0]]
+    ' Snap the panel off-screen and hide it. We don't animate the
+    ' slide-out: hiding immediately is what guarantees the panel never
+    ' lingers as a peeking sliver on the left edge.
     m.expandAnim.control = "stop"
-    m.expandAnim.control = "start"
+    m.panel.translation = [-360, 0]
+    m.panel.visible = false
     m.stripToggle.setFocus(true)
     ' Tell the parent to put focus back on its grid - never leave
-    ' the user stranded after a collapse animation.
+    ' the user stranded after a collapse.
     m.top.command = { action: "collapsed" }
 end sub
 

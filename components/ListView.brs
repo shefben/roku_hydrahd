@@ -300,10 +300,28 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     if key = "options" and m.grid.isInFocusChain() then
         if toggleFavoriteAtFocus() then return true
     end if
-    ' LEFT-to-sidebar handoff has moved to MainScene (LEFT on the
-    ' leftmost nav button). MarkupGrid does bubble LEFT at col 0, so
-    ' we could trigger here too, but keeping the trigger in one place
-    ' avoids two SideMenu instances and ambiguous focus restoration.
+    ' LEFT from the leftmost grid column opens the side drawer. Unlike
+    ' RowList, MarkupGrid bubbles LEFT at col 0 (it only consumes LEFT
+    ' when there's another column to move to), so by the time we see a
+    ' "left" here the cursor is already on the first column. We confirm
+    ' with a column check anyway, then ask MainScene to reveal the rail.
+    if key = "left" then
+        ' MarkupGrid only lets LEFT bubble here when the cursor is already
+        ' at the leftmost column (otherwise it consumes LEFT to move). So
+        ' any LEFT we see means "open the drawer". We still sanity-check
+        ' the column, treating invalid / -1 (no item highlighted yet) /
+        ' column 0 as the left edge. (-1 happens before the grid has
+        ' reported a focused item; BrightScript's -1 mod cols isn't 0, so
+        ' it must be handled explicitly.)
+        idx = m.grid.itemFocused
+        cols = m.grid.numColumns
+        if cols = invalid or cols < 1 then cols = 1
+        if idx = invalid or idx < 0 or (idx mod cols) = 0 then
+            m.top.requestNav = { action: "openMenu" }
+            return true
+        end if
+        return false
+    end if
     return false
 end function
 

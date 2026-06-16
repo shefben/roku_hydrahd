@@ -2,7 +2,10 @@
 <component name="DetailsTask" extends="Task">
     <interface>
         <field id="kind" type="string" />
-        <field id="id" type="string" />
+        <!-- No <field id="id"> here: every SceneGraph node already has a
+             built-in string `id` field. Redeclaring it is rejected by
+             stricter runtimes ("duplicate field id") and breaks the task.
+             doWork() reads m.top.id (the built-in) directly. -->
         <field id="href" type="string" />
         <field id="result" type="assocarray" alwaysNotify="true" />
     </interface>

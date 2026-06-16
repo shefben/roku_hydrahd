@@ -170,6 +170,16 @@ sub onChildNavRequest(event as Object)
     payload = event.getData()
     if payload = invalid then return
     action = payload.action
+    ' LEFT from the leftmost grid column bubbles up as openMenu. Reveal
+    ' the side drawer directly (panel slides fully in + focus lands on
+    ' its first button). Handled before the discover-cancel below so a
+    ' simple menu peek doesn't tear down LAN resolver discovery.
+    if action = "openMenu" then
+        if m.sideMenu <> invalid and m.sideMenu.visible then
+            m.sideMenu.expandRequest = true
+        end if
+        return
+    end if
     ' DetailsTask competes with DiscoverTask's subnet scan for Roku's
     ' tight per-channel TCP socket pool (~10-15). If discover is still
     ' running when the user clicks a poster, the page fetch can stall
