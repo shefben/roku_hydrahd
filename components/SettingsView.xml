@@ -48,6 +48,14 @@
             </Group>
 
             <Group>
+                <Label text="Default Video Quality" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                <Label id="qualityValue" translation="[0, 34]" width="1760" wrap="true" maxLines="1"
+                       text="Best opens at the top rendition; 1080p/720p cap resolution; Data Saver picks the lowest for slow connections."
+                       font="font:SmallSystemFont" color="0x9a9a9aff" />
+                <ButtonGroup id="qualityRow" translation="[0, 70]" layoutDirection="horiz" itemSpacings="[12]" minWidth="150" />
+            </Group>
+
+            <Group>
                 <Label text="Captions" font="font:MediumBoldSystemFont" color="0xffffffff" />
                 <Label translation="[0, 30]" text="Choose default size, text color, and background - applied to every video."
                        font="font:SmallSystemFont" color="0x9a9a9aff" />

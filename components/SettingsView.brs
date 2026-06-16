@@ -34,6 +34,10 @@ sub init()
     m.resolverStatus = m.top.findNode("resolverStatus")
     m.resolverStatus.text = ""
 
+    m.qualityRow = m.top.findNode("qualityRow")
+    m.qualityRow.buttons = ["Best", "1080p", "720p", "Data Saver"]
+    m.qualityRow.observeField("buttonSelected", "onQualitySelected")
+
     m.ccSizeRow = m.top.findNode("ccSizeRow")
     m.ccSizeRow.buttons = ["Text: Small", "Text: Medium", "Text: Large"]
     m.ccSizeRow.observeField("buttonSelected", "onCcSizeSelected")
@@ -50,7 +54,7 @@ sub init()
     m.urlActionsRow.buttons = ["Save", "Cancel"]
     m.urlActionsRow.observeField("buttonSelected", "onUrlActionsSelected")
 
-    m.rowOrder = [m.baseRow, m.tmdbRow, m.inChannelRow, m.resolverRow, m.ccSizeRow, m.ccColorRow, m.ccBgRow]
+    m.rowOrder = [m.baseRow, m.tmdbRow, m.inChannelRow, m.resolverRow, m.qualityRow, m.ccSizeRow, m.ccColorRow, m.ccBgRow]
     m.currentRow = 0
 
     m.editTarget = ""
@@ -202,6 +206,20 @@ sub onUrlActionsSelected()
         m.urlEditGroup.visible = false
         m.baseRow.setFocus(true)
         m.currentRow = 0
+    end if
+end sub
+
+sub onQualitySelected()
+    idx = m.qualityRow.buttonSelected
+    val = "best"
+    if idx = 1 then val = "1080"
+    if idx = 2 then val = "720"
+    if idx = 3 then val = "saver"
+    U_PrefSet("videoQuality", val)
+    m.qualityValue = m.top.findNode("qualityValue")
+    if m.qualityValue <> invalid then
+        m.qualityValue.text = "Current: " + m.qualityRow.buttons[idx]
+        m.qualityValue.color = "0x9affa0ff"
     end if
 end sub
 

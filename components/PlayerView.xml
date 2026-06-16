@@ -16,6 +16,21 @@
 
         <Rectangle id="overlayBg" width="1920" height="1080" color="0x000000aa" visible="false" />
 
+        <!-- Custom caption overlay. PlayerView renders the selected
+             subtitle itself (from parsed cues) so the user's caption
+             size / color / background actually apply - Roku styles native
+             subtitleTrack captions via system settings only. capBg is
+             resized to hug the text each cue. Driven by capTimer reading
+             video.position (the position observer alone is ~1 Hz, too
+             coarse for caption timing). -->
+        <Group id="capBox" translation="[0, 902]" visible="false">
+            <Rectangle id="capBg" translation="[560, 0]" width="800" height="96" color="0x000000aa" />
+            <Label id="capLabel" translation="[160, 0]" width="1600" height="96" text=""
+                   horizAlign="center" vertAlign="center" wrap="true" maxLines="3"
+                   font="font:LargeBoldSystemFont" color="0xffffffff" />
+        </Group>
+        <Timer id="capTimer" duration="0.25" repeat="true" />
+
         <!-- Netflix-style skip prompt at the bottom-right corner of the
              1920x1080 frame: ~80px in from each edge. Two visual modes:
              intro/recap show "Skip Intro"/"Skip Recap" and fade after
@@ -113,7 +128,7 @@
 
             <Group id="ccStylePanel" visible="false">
                 <Label text="Caption Style - up arrow returns to toolbar" font="font:MediumBoldSystemFont" color="0xffffffff" />
-                <LabelList id="ccStyleRow" translation="[0, 36]" itemSize="[420, 48]" numRows="9" drawFocusFeedback="true" />
+                <LabelList id="ccStyleRow" translation="[0, 36]" itemSize="[420, 48]" numRows="11" drawFocusFeedback="true" />
             </Group>
 
             <Group id="audioPanel" visible="false">

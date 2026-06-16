@@ -33,7 +33,8 @@ sub init()
     m.ccStyleLabels = [
         "Text: Small", "Text: Medium", "Text: Large",
         "Color: White", "Color: Yellow", "Color: Cyan",
-        "BG: Black", "BG: Semi", "BG: None"
+        "BG: Black", "BG: Semi", "BG: None",
+        "Sync +0.25s", "Sync -0.25s"
     ]
     m.ccStyleRow.content = buildLabelContent(m.ccStyleLabels)
     m.ccStyleRow.observeField("itemSelected", "onCcStyleChosen")
@@ -106,6 +107,17 @@ sub init()
     m.advanceOverlay = m.top.findNode("advanceOverlay")
     m.advanceStatus = m.top.findNode("advanceStatus")
     m.advance = invalid
+
+    ' Custom caption renderer state.
+    m.capBox = m.top.findNode("capBox")
+    m.capBg = m.top.findNode("capBg")
+    m.capLabel = m.top.findNode("capLabel")
+    m.capTimer = m.top.findNode("capTimer")
+    if m.capTimer <> invalid then m.capTimer.observeField("fire", "onCapTick")
+    m.cues = []
+    m.subOffset = 0.0
+    m.curCueText = ""
+    m.subTask = invalid
 
     applyCcGlobal()
 
@@ -194,25 +206,17 @@ sub onArgs()
     ' the user can drop back to ABR if their bandwidth can't sustain it.
     initUrl = m.streamUrl
     initFmt = m.streamFormat
-    bestIdx = -1
-    bestHeight = -1
-    for i = 0 to m.qualities.Count() - 1
-        q = m.qualities[i]
-        if q.url <> invalid and q.url <> "" then
-            h = 0
-            if q.height <> invalid then h = W_AsInt(q.height)
-            if h > bestHeight then
-                bestHeight = h
-                bestIdx = i
-            end if
-        end if
-    end for
-    if bestIdx >= 0 then
-        top = m.qualities[bestIdx]
-        initUrl = top.url
+    ' Honor the user's Default Video Quality (Settings): "best" (default,
+    ' top rendition - the original behavior), "1080"/"720" (highest at or
+    ' below that cap), or "saver" (lowest, for slow connections / data).
+    pref = U_PrefDefault("videoQuality", "best")
+    selIdx = pickPreferredQualityIndex(pref)
+    if selIdx >= 0 then
+        sel = m.qualities[selIdx]
+        initUrl = sel.url
         initFmt = "hls"
-        m.activeQuality = bestIdx
-        print "[Player] auto-selecting top quality "; top.label
+        m.activeQuality = selIdx
+        print "[Player] quality pref="; pref; " -> "; sel.label
     end if
     startPlayback(initUrl, initFmt)
     renderQualityChips()
@@ -289,16 +293,27 @@ sub startPlayback(url as String, fmt as String)
     m.video.content = cn
     m.video.control = "play"
     m.status.text = "Loading..."
+    ' Switch the auto-picked track to custom rendering (native stays as the
+    ' fallback until cues parse).
+    if m.activeSubtitle >= 0 and m.activeSubtitle < m.subtitles.Count() then
+        loadCustomSubtitle(m.subtitles[m.activeSubtitle].url)
+    end if
 end sub
 
 sub onVideoState()
     s = m.video.state
     print "[Player] state="; s
+    ' Custom caption tick loop only runs while actively playing.
+    if s <> "playing" then
+        if m.capTimer <> invalid then m.capTimer.control = "stop"
+        if m.capBox <> invalid then m.capBox.visible = false
+    end if
     if s = "playing" then
         m.status.text = ""
         if not m.overlay.visible then m.video.setFocus(true)
         ingestRendition()
         ingestAudio()
+        if m.cues <> invalid and m.cues.Count() > 0 and m.capTimer <> invalid then m.capTimer.control = "start"
     else if s = "buffering" then
         m.status.text = "Buffering..."
     else if s = "error" then
@@ -1086,6 +1101,37 @@ function buildLabelContent(labels as Object) as Object
     return root
 end function
 
+' Map the Default Video Quality preference to a variant index, or -1 to
+' use the master playlist (ABR). Variants carry a per-rendition URL and a
+' height; we cap on height for 1080/720 and fall back to the lowest with
+' a URL when nothing fits.
+function pickPreferredQualityIndex(pref as String) as Integer
+    if m.qualities = invalid or m.qualities.Count() = 0 then return -1
+    bestIdx = -1 : bestH = -1
+    lowIdx = -1 : lowH = 999999
+    capIdx = -1 : capH = -1
+    cap = 100000
+    if pref = "1080" then cap = 1080
+    if pref = "720" then cap = 720
+    for i = 0 to m.qualities.Count() - 1
+        q = m.qualities[i]
+        if q.url <> invalid and q.url <> "" then
+            h = 0
+            if q.height <> invalid then h = W_AsInt(q.height)
+            if h > bestH then bestH = h : bestIdx = i
+            if h < lowH then lowH = h : lowIdx = i
+            if h <= cap and h > capH then capH = h : capIdx = i
+        end if
+    end for
+    if pref = "saver" then return lowIdx
+    if pref = "1080" or pref = "720" then
+        if capIdx >= 0 then return capIdx
+        return lowIdx
+    end if
+    ' "best" (default)
+    return bestIdx
+end function
+
 sub renderQualityChips()
     labels = ["Auto"]
     for i = 0 to m.qualities.Count() - 1
@@ -1176,7 +1222,7 @@ sub onCcChosen()
     if idx = invalid then return
     if idx = 0 then
         m.activeSubtitle = -1
-        m.video.subtitleTrack = ""
+        applySubtitleSelection()
         m.status.text = "Subtitles off"
         return
     end if
@@ -1184,7 +1230,7 @@ sub onCcChosen()
     if sIdx < 0 or sIdx >= m.subtitles.Count() then return
     sub_ = m.subtitles[sIdx]
     m.activeSubtitle = sIdx
-    m.video.subtitleTrack = sub_.url
+    applySubtitleSelection()
     m.status.text = "Subtitles: " + sub_.name
 end sub
 
@@ -1208,6 +1254,19 @@ end sub
 sub onCcStyleChosen()
     idx = m.ccStyleRow.itemSelected
     if idx = invalid then return
+    ' Subtitle sync offset (not a stored style - applies to custom cues).
+    if idx = 9 then
+        m.subOffset = m.subOffset + 0.25
+        m.curCueText = ""
+        m.status.text = "Subtitle sync: " + Str(m.subOffset) + "s"
+        return
+    end if
+    if idx = 10 then
+        m.subOffset = m.subOffset - 0.25
+        m.curCueText = ""
+        m.status.text = "Subtitle sync: " + Str(m.subOffset) + "s"
+        return
+    end if
     reg = CreateObject("roRegistrySection", "HydraHD")
     if idx = 0 then
         reg.Write("ccTextSize", "small")
@@ -1254,8 +1313,116 @@ sub switchSource(url as String, fmt as String)
     m.video.control = "play"
 end sub
 
+' Apply the user's caption style (size / color / background) to the custom
+' caption Label+box. This is what makes the CC Settings actually do
+' something - native subtitleTrack styling is system-controlled on Roku.
 sub applyCcGlobal()
-    return
+    if m.capLabel = invalid then return
+    reg = CreateObject("roRegistrySection", "HydraHD")
+    sz = "medium"
+    if reg.Exists("ccTextSize") then sz = reg.Read("ccTextSize")
+    if sz = "small" then
+        m.capLabel.font = "font:MediumBoldSystemFont"
+    else
+        ' medium / large both use the largest system preset (Roku has no
+        ' larger built-in bold preset without bundling a TTF).
+        m.capLabel.font = "font:LargeBoldSystemFont"
+    end if
+    color = "0xffffffff"
+    if reg.Exists("ccTextColor") then color = reg.Read("ccTextColor") + "ff"
+    m.capLabel.color = color
+
+    bgHex = "000000"
+    if reg.Exists("ccBgColor") then bgHex = Mid(reg.Read("ccBgColor"), 3)
+    bgOp = 67
+    if reg.Exists("ccBgOpacity") then bgOp = reg.Read("ccBgOpacity").ToInt()
+    a = Cint(bgOp * 255 / 100)
+    if a > 255 then a = 255
+    if a < 0 then a = 0
+    aHex = StrI(a, 16).Trim()
+    if Len(aHex) = 1 then aHex = "0" + aHex
+    if m.capBg <> invalid then m.capBg.color = "0x" + bgHex + aHex
+end sub
+
+' Load + parse the selected subtitle into timed cues for custom rendering.
+' Native subtitleTrack stays set as a fallback until cues arrive.
+sub loadCustomSubtitle(url as String)
+    if url = invalid or url = "" then return
+    if m.subTask <> invalid then m.subTask.unobserveField("cues")
+    m.subTask = createObject("roSGNode", "SubtitleTask")
+    if m.subTask = invalid then return
+    m.subTask.observeField("cues", "onSubCues")
+    m.subTask.referer = m.streamReferer
+    m.subTask.url = url
+    m.subTask.control = "RUN"
+end sub
+
+sub onSubCues()
+    cues = m.subTask.cues
+    if cues = invalid then cues = []
+    m.cues = cues
+    if m.cues.Count() > 0 then
+        ' Custom rendering takes over: turn off native so captions don't
+        ' double up, and start the tick loop if we're playing.
+        m.video.subtitleTrack = ""
+        m.curCueText = ""
+        if m.video.state = "playing" and m.capTimer <> invalid then m.capTimer.control = "start"
+    end if
+    ' If parse failed (0 cues) we leave the native subtitleTrack as-is.
+end sub
+
+' Apply the current m.activeSubtitle selection: load custom cues (with
+' native as the immediate fallback), or clear everything when off.
+sub applySubtitleSelection()
+    if m.activeSubtitle < 0 or m.activeSubtitle >= m.subtitles.Count() then
+        m.cues = []
+        m.curCueText = ""
+        m.video.subtitleTrack = ""
+        if m.capTimer <> invalid then m.capTimer.control = "stop"
+        if m.capBox <> invalid then m.capBox.visible = false
+        return
+    end if
+    url = m.subtitles[m.activeSubtitle].url
+    m.video.subtitleTrack = url        ' immediate native fallback
+    m.cues = []
+    loadCustomSubtitle(url)
+end sub
+
+' Tick: show the cue covering the current playhead (+ user sync offset),
+' resizing the background box to hug the text. Hidden while the options
+' overlay is open or when there's no active cue.
+sub onCapTick()
+    if m.capBox = invalid then return
+    if m.cues = invalid or m.cues.Count() = 0 or m.overlay.visible then
+        m.capBox.visible = false
+        return
+    end if
+    tsec = m.video.position + m.subOffset
+    text = ""
+    for each c in m.cues
+        if tsec >= c.s and tsec <= c.e then
+            text = c.text
+            exit for
+        end if
+    end for
+    if text = m.curCueText then return
+    m.curCueText = text
+    if text = "" then
+        m.capBox.visible = false
+        return
+    end if
+    m.capLabel.text = text
+    ' Resize the bg to hug the rendered text.
+    rect = m.capLabel.boundingRect()
+    if rect <> invalid and rect.width > 0 then
+        w = rect.width + 48
+        if w > 1600 then w = 1600
+        h = rect.height + 18
+        m.capBg.width = w
+        m.capBg.height = h
+        m.capBg.translation = [(1920 - w) / 2, (96 - h) / 2]
+    end if
+    m.capBox.visible = true
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
