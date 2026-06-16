@@ -7,6 +7,7 @@
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/ResumePicker.brs" />
+    <!-- Watchlist/Utils/Sync are included below for W_MarkWatched etc. -->
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
     <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
     <script type="text/brightscript" uri="pkg:/source/Sync.brs" />
