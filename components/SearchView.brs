@@ -53,6 +53,11 @@ sub init()
     m.chipClear.observeField("buttonSelected", "onChipsClear")
     renderChips()
 
+    ' Discovery: fill the results pane with Trending titles before the user
+    ' types anything, so Search opens as a browse surface, not a blank
+    ' keyboard. Live results replace this as soon as they type (>=2 chars).
+    loadTrending()
+
     ' MainScene.focusActiveChild() runs *after* this init returns and calls
     ' setFocus(true) on the SearchView root Group, which would yank focus
     ' off the keyboard and leave the user with arrow keys that do nothing.
@@ -151,13 +156,51 @@ end sub
 sub onTextChange()
     if Len(m.query) < 2 then
         m.empty.visible = false
-        m.grid.content = invalid
-        m.resultTitle.visible = false
         m.timer.control = "stop"
+        m.lastQuery = ""
+        ' Back to the trending/discovery grid when the query is too short.
+        loadTrending()
         return
     end if
     m.timer.control = "stop"
     m.timer.control = "start"
+end sub
+
+' Populate the results grid with Trending titles for discovery. Only paints
+' while the user hasn't entered a real query, so it never clobbers results.
+sub loadTrending()
+    if m.trendTask <> invalid then m.trendTask.unobserveField("result")
+    m.trendTask = createObject("roSGNode", "ListTask")
+    if m.trendTask = invalid then return
+    m.trendTask.observeField("result", "onTrendingResult")
+    m.trendTask.source = "popular"
+    m.trendTask.page = 1
+    m.trendTask.control = "RUN"
+end sub
+
+sub onTrendingResult()
+    if Len(m.query) >= 2 then return   ' user started typing; ignore stale trending
+    res = m.trendTask.result
+    if res = invalid or res.items = invalid or res.items.Count() = 0 then return
+    m.items = res.items
+    root = createObject("roSGNode", "ContentNode")
+    for each item in m.items
+        cell = root.createChild("ContentNode")
+        cell.title = item.title
+        cell.HDPosterUrl = item.poster
+        cell.SDPosterUrl = item.poster
+        cell.shortDescriptionLine1 = item.rating
+        cell.shortDescriptionLine2 = item.year
+        cell.releaseDate = item.quality
+        cell.id = item.id
+        U_SetCellKind(cell, item.kind)
+        cell.url = item.href
+        U_SetCellPct(cell, W_GetProgressPct("", item.href, 0, 0))
+    end for
+    m.grid.content = root
+    m.empty.visible = false
+    m.resultTitle.text = "Trending now"
+    m.resultTitle.visible = true
 end sub
 
 sub onDebounce()
