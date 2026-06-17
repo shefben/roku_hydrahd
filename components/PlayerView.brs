@@ -280,15 +280,17 @@ sub startPlayback(url as String, fmt as String)
         ' "English - SDH", "English - eng(5)", "ENGLISH" etc. all qualify.
         ' Plain "English" wins over SDH variants when both exist.
         m.activeSubtitle = pickDefaultSubtitle(m.subtitles)
-        if m.activeSubtitle >= 0 then
-            m.video.subtitleTrack = m.subtitles[m.activeSubtitle].url
-        else
-            m.video.subtitleTrack = ""
-        end if
     else
         m.activeSubtitle = -1
-        m.video.subtitleTrack = ""
     end if
+
+    ' Custom caption rendering owns the on-screen captions. Force Roku's
+    ' native caption overlay OFF (globalCaptionMode + empty subtitleTrack)
+    ' so the user never sees two sets of subtitles (custom white text AND
+    ' the system-rendered track). Native is re-enabled only as a fallback
+    ' in onSubCues when the subtitle file fails to parse.
+    m.video.subtitleTrack = ""
+    m.video.globalCaptionMode = "Off"
 
     m.video.content = cn
     m.video.control = "play"
@@ -744,7 +746,10 @@ sub updateNextEpBanner(posSec as Integer)
     remaining = dur - posSec
 
     wasActive = m.nextEpActive
-    m.nextEpActive = (remaining >= 0 and remaining <= 135)
+    ' Last 5 minutes of the episode: the floating banner shows for 30 s
+    ' (nextEpTimer) and the action-bar "Skip to Next Episode" entry stays
+    ' available right up to the end.
+    m.nextEpActive = (remaining >= 0 and remaining <= 300)
 
     ' Entering or leaving the window? Re-render the action bar if
     ' the overlay happens to be open so the button appears/vanishes.
@@ -1362,29 +1367,42 @@ sub onSubCues()
     if cues = invalid then cues = []
     m.cues = cues
     if m.cues.Count() > 0 then
-        ' Custom rendering takes over: turn off native so captions don't
-        ' double up, and start the tick loop if we're playing.
+        ' Custom rendering: keep native captions fully OFF so they don't
+        ' double up with our overlay.
+        m.video.globalCaptionMode = "Off"
         m.video.subtitleTrack = ""
         m.curCueText = ""
         if m.video.state = "playing" and m.capTimer <> invalid then m.capTimer.control = "start"
+    else
+        ' Parse failed - fall back to Roku's native captions for this track.
+        if m.activeSubtitle >= 0 and m.activeSubtitle < m.subtitles.Count() then
+            m.video.subtitleTrack = m.subtitles[m.activeSubtitle].url
+            m.video.globalCaptionMode = "On"
+        end if
     end if
-    ' If parse failed (0 cues) we leave the native subtitleTrack as-is.
 end sub
 
 ' Apply the current m.activeSubtitle selection: load custom cues (with
 ' native as the immediate fallback), or clear everything when off.
 sub applySubtitleSelection()
     if m.activeSubtitle < 0 or m.activeSubtitle >= m.subtitles.Count() then
+        ' Off: clear custom cues AND native captions.
         m.cues = []
         m.curCueText = ""
         m.video.subtitleTrack = ""
+        m.video.globalCaptionMode = "Off"
         if m.capTimer <> invalid then m.capTimer.control = "stop"
         if m.capBox <> invalid then m.capBox.visible = false
         return
     end if
     url = m.subtitles[m.activeSubtitle].url
-    m.video.subtitleTrack = url        ' immediate native fallback
+    ' Custom mode: native off; the parsed cues drive our overlay. (onSubCues
+    ' turns native back on only if the file fails to parse.)
+    m.video.subtitleTrack = ""
+    m.video.globalCaptionMode = "Off"
     m.cues = []
+    m.curCueText = ""
+    if m.capBox <> invalid then m.capBox.visible = false
     loadCustomSubtitle(url)
 end sub
 
