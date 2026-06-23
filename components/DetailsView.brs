@@ -664,6 +664,14 @@ sub openMirrorPickerEx(ep as Object, startPos as Integer, useSavedMirror as Bool
     end if
     if startPos > 0 then args.startPosition = startPos
 
+    ' Play / Resume / Restart / episode-click auto-pick the top-ranked
+    ' mirror so playback is one click (MirrorPicker sorts by reliability
+    ' and gracefully cascades to the next mirror on failure). "Choose
+    ' Mirror" passes useSavedMirror=false to force the manual list. The
+    ' directMirror / preferredMirrorHost handoff below is consulted first,
+    ' so autoPick only kicks in when there's no saved mirror to reuse.
+    if useSavedMirror then args.autoPick = true
+
     ' Saved-mirror handoff. For movies the saved embed URL covers the
     ' whole title and goes through as directMirror (skips ServersTask
     ' entirely). For TV the saved URL is episode-specific, so we only

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="SubtitleTask" extends="Task">
+    <interface>
+        <field id="url" type="string" />
+        <field id="referer" type="string" />
+        <field id="cues" type="array" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/tasks/SubtitleTask.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/HydraApi.brs" />
+</component>

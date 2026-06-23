@@ -163,6 +163,29 @@ function W_GetSeriesProgress(imdb as String, href as String) as Object
     return W_Read("s:" + W_ItemKey(imdb, href))
 end function
 
+' Mark a title finished so it drops out of Continue Watching without the
+' user having to actually play to the end ("Remove from Continue
+' Watching" / "Mark watched"). Movies flip the m: record; TV flips the
+' series s: pointer (W_ListInProgress keys off m:/s:).
+sub W_MarkWatched(imdb as String, href as String, kind as String)
+    k = W_ItemKey(imdb, href)
+    if k = "" then return
+    ts = CreateObject("roDateTime").AsSeconds()
+    if kind = "tv" then
+        s = W_Read("s:" + k)
+        if s = invalid then s = {}
+        s.done = true
+        s.ts = ts
+        W_Write("s:" + k, s)
+    else
+        mv = W_Read("m:" + k)
+        if mv = invalid then mv = { pos: 0, dur: 0 }
+        mv.done = true
+        mv.ts = ts
+        W_Write("m:" + k, mv)
+    end if
+end sub
+
 ' Returns the second to start playback at, or 0 if the user finished it / never
 ' got past the credit-skip window / never watched it.
 function W_ResumePosition(entry as Object) as Integer

@@ -1,0 +1,4 @@
+node_modules/
+serve.log
+screenshots/*.png
+channel/*.zip

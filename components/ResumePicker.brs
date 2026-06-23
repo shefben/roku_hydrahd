@@ -81,6 +81,8 @@ sub onArgs()
         btns.Push("Pick a different episode or season")
         m.actionMap.Push("pickEpisode")
     end if
+    btns.Push("Remove from Continue Watching")
+    m.actionMap.Push("remove")
     btns.Push("Cancel")
     m.actionMap.Push("cancel")
 
@@ -119,6 +121,17 @@ sub onActionSelected()
             view: "DetailsView"
             args: buildDetailsArgs(a)
         }
+        return
+    end if
+    if action = "remove" then
+        imdb = ""
+        href = ""
+        if a.imdb <> invalid then imdb = a.imdb
+        if a.href <> invalid then href = a.href
+        kind = "movie"
+        if a.kind <> invalid then kind = a.kind
+        W_MarkWatched(imdb, href, kind)
+        m.top.requestNav = { action: "back" }
         return
     end if
     ' Cancel - bubble back to the previous screen.

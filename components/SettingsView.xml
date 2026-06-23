@@ -20,22 +20,39 @@
             </Group>
 
             <Group>
-                <Label text="In-Channel Resolver (experimental)" font="font:MediumBoldSystemFont" color="0xffffffff" />
-                <Label id="inChannelHelp" translation="[0, 30]" width="1700" wrap="true" maxLines="3"
-                       text="Resolve mirror URLs directly inside the channel - no LAN host required. Off by default while implementation is incomplete; toggle on to test in-channel resolution. If a mirror fails, the channel still falls through to the Stream Resolver URL below."
+                <Label text="TMDB API Key (richer info)" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                <Label translation="[0, 34]" width="1760" wrap="true" maxLines="2"
+                       text="Optional free key from themoviedb.org. Adds real plot synopsis, ratings, cast photos and HD artwork to detail pages."
                        font="font:SmallSystemFont" color="0x9a9a9aff" />
-                <Label id="inChannelValue" translation="[0, 110]" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" />
-                <ButtonGroup id="inChannelRow" translation="[0, 140]" layoutDirection="horiz" itemSpacings="[12]" minWidth="170" />
+                <Label id="tmdbValue" translation="[0, 86]" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" />
+                <ButtonGroup id="tmdbRow" translation="[0, 118]" layoutDirection="horiz" itemSpacings="[12]" minWidth="170" />
+            </Group>
+
+            <Group>
+                <Label text="In-Channel Resolver (experimental)" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                <Label id="inChannelHelp" translation="[0, 34]" width="1760" wrap="true" maxLines="2"
+                       text="Resolve mirror URLs inside the channel - no LAN host needed. Falls back to the resolver URL below."
+                       font="font:SmallSystemFont" color="0x9a9a9aff" />
+                <Label id="inChannelValue" translation="[0, 86]" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" />
+                <ButtonGroup id="inChannelRow" translation="[0, 118]" layoutDirection="horiz" itemSpacings="[12]" minWidth="170" />
             </Group>
 
             <Group>
                 <Label text="External Resolver URL (fallback)" font="font:MediumBoldSystemFont" color="0xffffffff" />
-                <Label id="resolverHelp" translation="[0, 30]" width="1700" wrap="true" maxLines="4"
-                       text="Optional fallback used when the in-channel resolver above can't crack a mirror. Run resolver/server.py on any machine you control - LAN host (Pi / NAS / desktop) or cloud VPS (Oracle Always-Free, etc.). LAN hosts are auto-discovered via UDP 1901; for cloud paste the URL with 'Set Manually...'. See docs/RESOLVER_SETUP.md for deployment details."
+                <Label id="resolverHelp" translation="[0, 34]" width="1760" wrap="true" maxLines="2"
+                       text="Fallback when in-channel fails. Run resolver/server.py on a LAN host (auto-discovered) or set a cloud URL."
                        font="font:SmallSystemFont" color="0x9a9a9aff" />
-                <Label id="resolverValue" translation="[0, 130]" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" />
-                <ButtonGroup id="resolverRow" translation="[0, 160]" layoutDirection="horiz" itemSpacings="[12]" minWidth="220" />
-                <Label id="resolverStatus" translation="[0, 215]" text="" font="font:SmallSystemFont" color="0x9affa0ff" />
+                <Label id="resolverValue" translation="[0, 86]" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" />
+                <ButtonGroup id="resolverRow" translation="[0, 118]" layoutDirection="horiz" itemSpacings="[12]" minWidth="220" />
+                <Label id="resolverStatus" translation="[0, 170]" text="" font="font:SmallSystemFont" color="0x9affa0ff" />
+            </Group>
+
+            <Group>
+                <Label text="Default Video Quality" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                <Label id="qualityValue" translation="[0, 34]" width="1760" wrap="true" maxLines="1"
+                       text="Best opens at the top rendition; 1080p/720p cap resolution; Data Saver picks the lowest for slow connections."
+                       font="font:SmallSystemFont" color="0x9a9a9aff" />
+                <ButtonGroup id="qualityRow" translation="[0, 70]" layoutDirection="horiz" itemSpacings="[12]" minWidth="150" />
             </Group>
 
             <Group>

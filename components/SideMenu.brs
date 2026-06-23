@@ -22,13 +22,14 @@ sub init()
     m.expanded = false
     ' Action codes parallel to the buttons array; index 0 closes the
     ' drawer, the rest map to MainScene nav tabs (or "exit").
-    m.actions = ["close", "search", "favorites", "movies", "tv", "settings", "home", "exit"]
+    m.actions = ["close", "search", "favorites", "movies", "tv", "genres", "settings", "home", "exit"]
     m.menuBg.buttons = [
         "< Close",
         "Search",
         "Favorites",
         "Browse Movies",
         "Browse TV Shows",
+        "Browse Genres",
         "Options",
         "Home",
         "Exit"
@@ -42,6 +43,7 @@ sub init()
         favorites: "navMyList"
         movies:    "navMovies"
         tv:        "navTv"
+        genres:    "navGenres"
         settings:  "navSettings"
         home:      "navHome"
     }
@@ -49,12 +51,16 @@ sub init()
 end sub
 
 sub updateStripVisual(focused as Boolean)
+    ' The collapsed strip is fully hidden until the user actually reaches
+    ' it (or the drawer is expanding). Showing a permanent 6px sliver was
+    ' read as a rendering glitch ("rail slightly visible before you
+    ' navigate to it"). Only light it up when it holds focus.
     if focused then
         m.strip.opacity = 1.0
         m.stripChevron.opacity = 1.0
     else
-        m.strip.opacity = 0.3
-        m.stripChevron.opacity = 0.4
+        m.strip.opacity = 0.0
+        m.stripChevron.opacity = 0.0
     end if
 end sub
 
@@ -91,9 +97,10 @@ end function
 function collapseSilent(_unused as Dynamic) as Object
     if not m.expanded then return invalid
     m.expanded = false
-    m.expandInterp.keyValue = [[0, 0], [-280, 0]]
+    ' Snap straight off-screen (no animation) - used when the parent is
+    ' switching tabs/tearing down and doesn't want a lingering slide.
     m.expandAnim.control = "stop"
-    m.expandAnim.control = "start"
+    m.panel.translation = [-460, 0]
     return invalid
 end function
 
@@ -112,7 +119,7 @@ end sub
 sub expand()
     if m.expanded then return
     m.expanded = true
-    m.expandInterp.keyValue = [[-280, 0], [0, 0]]
+    m.expandInterp.keyValue = [[-460, 0], [0, 0]]
     m.expandAnim.control = "stop"
     m.expandAnim.control = "start"
     ' Land focus on the first button (the close arrow) so the user
@@ -127,12 +134,14 @@ end sub
 sub collapse()
     if not m.expanded then return
     m.expanded = false
-    m.expandInterp.keyValue = [[0, 0], [-280, 0]]
+    ' Animate the panel back off-screen (to -460, fully hidden). Symmetric
+    ' with expand() so the drawer slides shut instead of snapping.
+    m.expandInterp.keyValue = [[0, 0], [-460, 0]]
     m.expandAnim.control = "stop"
     m.expandAnim.control = "start"
     m.stripToggle.setFocus(true)
     ' Tell the parent to put focus back on its grid - never leave
-    ' the user stranded after a collapse animation.
+    ' the user stranded after a collapse.
     m.top.command = { action: "collapsed" }
 end sub
 

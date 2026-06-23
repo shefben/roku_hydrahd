@@ -39,19 +39,29 @@
              on whether this button currently holds focus. -->
         <Button id="stripToggle" translation="[-200, 0]" minWidth="6" text="" />
 
-        <!-- The slide-out panel itself. Sits at x=-280 collapsed and
-             animates to x=0 when expanded. -->
-        <Group id="panel" translation="[-280, 0]">
-            <Rectangle width="280" height="1080" color="0x0a0a0af0" />
-            <Rectangle translation="[278, 0]" width="2" height="1080" color="0xff2424ff" opacity="0.7" />
+        <!-- The slide-out panel itself. Hidden (visible=false) AND parked
+             fully off-screen at x=-360 when collapsed; animates to x=0 when
+             expanded. visible=false guarantees no peek regardless of how
+             wide the auto-sized buttons grow (the previous -280 let the
+             widest labels - "Browse Movies"/"Browse TV Shows" - poke past
+             the left edge). Panel widened to 340 so those labels fit
+             inside the panel background instead of overflowing its border. -->
+        <!-- Parked fully off-screen at x=-460 when collapsed (panel bg is
+             340 wide; -460 hides it AND its widest auto-sized button with
+             margin to spare). Because the collapsed position itself hides
+             everything, we can animate the close instead of snapping it -
+             no visible=false toggle and no peeking sliver. -->
+        <Group id="panel" translation="[-460, 0]">
+            <Rectangle width="340" height="1080" color="0x0a0a0af0" />
+            <Rectangle translation="[338, 0]" width="2" height="1080" color="0xff2424ff" opacity="0.7" />
             <ButtonGroup id="menuBg" translation="[20, 80]" layoutDirection="vert"
-                         itemSpacings="[14]" minWidth="240" />
+                         itemSpacings="[14]" minWidth="300" />
         </Group>
 
         <Animation id="expandAnim" duration="0.22" easeFunction="outQuad" repeat="false">
             <Vector2DFieldInterpolator id="expandInterp"
                 key="[0, 1]"
-                keyValue="[[-280, 0], [0, 0]]"
+                keyValue="[[-460, 0], [0, 0]]"
                 fieldToInterp="panel.translation" />
         </Animation>
     </children>

@@ -722,7 +722,7 @@ end function
 ' missing.
 function HM_FetchTitleFromTmdb(tmdb as String, kind as String, session as Object) as String
     if tmdb = invalid or tmdb = "" then return ""
-    metaUrl = "https://db.videasy.net/3/" + kind + "/" + tmdb
+    metaUrl = "https://db.videasy.to/3/" + kind + "/" + tmdb
     res = HC_Get(session, metaUrl, {}, 5000)
     if res = invalid or res.body = "" then return ""
     meta = ParseJSON(res.body)

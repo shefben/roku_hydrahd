@@ -14,6 +14,14 @@
 
     <children>
         <Rectangle id="bg" color="0x0a0a0aff" width="1920" height="1080" />
+        <!-- Subtle brand-tinted gradient so the screen isn't a flat slab. -->
+        <Poster id="bgGradient" uri="pkg:/images/bg_gradient.png" width="1920" height="1080" loadDisplayMode="scaleToFill" />
+
+        <!-- Header band frames the nav so it reads as a real top bar instead
+             of buttons floating on black. Thin red accent line underneath
+             ties it to the HydraHD brand color and separates it from content. -->
+        <Rectangle id="headerBar" color="0x161616ff" width="1920" height="104" />
+        <Rectangle id="headerAccent" translation="[0, 104]" width="1920" height="3" color="0xff2424ff" />
 
         <LayoutGroup id="topBar" translation="[60, 30]" layoutDirection="horiz" itemSpacings="[20]" vertAlignment="center">
             <Label id="logo" text="HydraHD" font="font:LargeBoldSystemFont" color="0xff2424ff" />
@@ -44,5 +52,24 @@
              move out of those views. Drawn last so the expanded panel
              overlays content. -->
         <SideMenu id="sideMenu" />
+
+        <!-- Quick fade applied to contentHost on every view switch. -->
+        <Animation id="contentFade" duration="0.18" easeFunction="outQuad" repeat="false">
+            <FloatFieldInterpolator id="contentFadeInterp"
+                key="[0, 1]" keyValue="[0.0, 1.0]" fieldToInterp="contentHost.opacity" />
+        </Animation>
+
+        <!-- Exit confirmation overlay (BACK on the Home screen). -->
+        <Group id="exitDialog" visible="false">
+            <Rectangle width="1920" height="1080" color="0x000000dd" />
+            <Rectangle translation="[660, 410]" width="600" height="250" color="0x161616ff" />
+            <Rectangle translation="[660, 410]" width="600" height="4" color="0xff2424ff" />
+            <Label translation="[660, 448]" width="600" height="50" text="Exit HydraHD?"
+                   horizAlign="center" vertAlign="center" font="font:LargeBoldSystemFont" color="0xffffffff" />
+            <Label translation="[660, 506]" width="600" height="36" text="Return to the Roku home screen?"
+                   horizAlign="center" vertAlign="center" font="font:SmallSystemFont" color="0xc8c8c8ff" />
+            <ButtonGroup id="exitChoices" translation="[770, 572]" layoutDirection="horiz"
+                         itemSpacings="[24]" minWidth="180" />
+        </Group>
     </children>
 </component>

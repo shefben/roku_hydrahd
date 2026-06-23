@@ -1,15 +1,16 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<component name="SeasonChip" extends="Group">
+<component name="GenreCard" extends="Group">
     <interface>
         <field id="itemContent" type="node" onChange="onContent" />
         <field id="focusPercent" type="float" onChange="onFocus" />
-        <field id="width" type="float" value="170" />
-        <field id="height" type="float" value="60" />
+        <field id="width" type="float" value="300" />
+        <field id="height" type="float" value="120" />
     </interface>
     <script type="text/brightscript">
         <![CDATA[
         sub init()
             m.bg = m.top.findNode("bg")
+            m.accent = m.top.findNode("accent")
             m.label = m.top.findNode("label")
         end sub
         sub onContent()
@@ -18,22 +19,22 @@
             m.label.text = c.title
         end sub
         sub onFocus()
-            f = m.top.focusPercent
-            if f >= 0.5 then
+            if m.top.focusPercent >= 0.5 then
                 m.bg.color = "0xff2424ff"
+                m.accent.color = "0xffffffff"
                 m.label.color = "0xffffffff"
             else
-                m.bg.color = "0x232323ff"
-                m.label.color = "0xc8c8c8ff"
+                m.bg.color = "0x1c1c22ff"
+                m.accent.color = "0xff2424ff"
+                m.label.color = "0xeeeeeeff"
             end if
         end sub
         ]]>
     </script>
     <children>
-        <Rectangle id="bg" width="170" height="60" color="0x232323ff" />
-        <!-- SmallBold + full-width label so "Season 10" fits instead of
-             ellipsizing to "Seaso..." (every chip looked identical before). -->
-        <Label id="label" translation="[6, 0]" width="158" height="60" maxLines="1" text=""
-               font="font:SmallBoldSystemFont" color="0xc8c8c8ff" horizAlign="center" vertAlign="center" />
+        <Rectangle id="bg" width="300" height="120" color="0x1c1c22ff" />
+        <Rectangle id="accent" width="6" height="120" color="0xff2424ff" />
+        <Label id="label" translation="[26, 0]" width="262" height="120" maxLines="2"
+               vertAlign="center" font="font:MediumBoldSystemFont" color="0xeeeeeeff" />
     </children>
 </component>

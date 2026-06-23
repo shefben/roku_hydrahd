@@ -1,0 +1,13 @@
+{
+  "name": "hydrahd-brs-debug",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local brs-engine harness to render and visually debug the HydraHD Roku channel in Chrome.",
+  "scripts": {
+    "serve": "node serve.js"
+  },
+  "dependencies": {
+    "brs-engine": "^2.2.0",
+    "brs-scenegraph": "^0.2.0"
+  }
+}
