@@ -236,7 +236,9 @@ sub startPlayback(url as String, fmt as String)
     cn.streamFormat = fmt
     cn.title = m.title.text
     cn.live = false
-    cn.playStart = m.startPosition
+    playStart = m.startPosition
+    if playStart <= 0 then playStart = 5
+    cn.playStart = playStart
     cn.httpCertificatesFile = "common:/certs/ca-bundle.crt"
     if m.top.args.poster <> invalid then cn.HDPosterUrl = m.top.args.poster
 
