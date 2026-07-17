@@ -57,6 +57,13 @@ sub init()
     m.startPosition = 0
     m.lastSavedPos = -999
     m.progressSaved = false
+    ' Guards the spurious-"finished" recovery in onVideoState - see there.
+    m.finishedRetries = 0
+    ' Position of the last premature "finished" stall; lets the retry
+    ' budget refill once playback makes real progress past a bad patch.
+    m.lastStallPos = -999
+    ' Per-episode same-mirror-failover state - see startSameEpisodeFailover.
+    m.failover = invalid
 
     ' Skip Intro / Play Next Episode banner state. Two distinct
     ' visual modes share the skipBanner node:
@@ -96,6 +103,12 @@ sub init()
     m.nextEpTimer.observeField("fire", "onNextEpTimerFire")
     m.nextEpActive = false      ' true while within 135 s of end AND next ep queued
     m.nextEpBannerShown = false ' true once floating banner has been displayed this ep
+
+    ' Lazy episodeQueue backfill for the Continue Watching resume path
+    ' (HomeView -> ResumePicker -> MirrorPicker), which carries episode
+    ' but no episodeQueue - see maybeFetchEpisodeQueue.
+    m.queueTask = invalid
+    m.queueInjectOnly = false
 
     ' Populate the action bar at least once so it has something for
     ' the user to focus on when the overlay first opens.
@@ -159,6 +172,14 @@ end sub
 sub onArgs()
     a = m.top.args
     if a = invalid then return
+    ' onQueueDetailResult re-assigns args purely to add episodeQueue /
+    ' episodeQueueIndex mid-playback. Skip the full (re)start work for
+    ' that one assignment - restarting the stream to add a queue field
+    ' would visibly interrupt playback.
+    if m.queueInjectOnly then
+        m.queueInjectOnly = false
+        return
+    end if
     m.title.text = a.title
     m.subtitle.text = a.subtitle
 
@@ -221,6 +242,69 @@ sub onArgs()
     startPlayback(initUrl, initFmt)
     renderQualityChips()
     renderCcChips()
+    maybeFetchEpisodeQueue()
+end sub
+
+' The Continue Watching resume path (HomeView -> ResumePicker ->
+' MirrorPicker) hands PlayerView an episode but no episodeQueue, so
+' everything queue-gated - the Skip-to-Next-Episode banner/action-bar
+' entry, finished-state auto-advance, outro Play-Next prompts - never
+' armed on resumed episodes. Backfill the queue in the background with
+' the same DetailsTask + flat-queue build DetailsView uses, then inject
+' it into m.top.args (playback untouched - see the queueInjectOnly
+' guard in onArgs).
+sub maybeFetchEpisodeQueue()
+    a = m.top.args
+    if a = invalid or a.kind <> "tv" then return
+    if a.episode = invalid then return
+    if a.episodeQueue <> invalid then return
+    if m.queueTask <> invalid then return
+    href = ""
+    if a.href <> invalid then href = a.href
+    if href = "" then return
+    task = createObject("roSGNode", "DetailsTask")
+    task.observeField("result", "onQueueDetailResult")
+    task.kind = "tv"
+    task.href = href
+    m.queueTask = task
+    task.control = "RUN"
+end sub
+
+sub onQueueDetailResult()
+    if m.queueTask = invalid then return
+    res = m.queueTask.result
+    m.queueTask.unobserveField("result")
+    m.queueTask = invalid
+    a = m.top.args
+    if a = invalid or a.episode = invalid then return
+    if a.episodeQueue <> invalid then return
+    if res = invalid or res.detail = invalid then return
+    d = res.detail
+    if d.seasons = invalid then return
+
+    queue = []
+    startIdx = -1
+    for si = 0 to d.seasons.Count() - 1
+        s = d.seasons[si]
+        for ei = 0 to s.episodes.Count() - 1
+            e = s.episodes[ei]
+            queue.Push({ slug: e.slug, season: e.season, episode: e.episode, name: e.name })
+            if startIdx = -1 and W_AsInt(e.season) = W_AsInt(a.episode.season) and W_AsInt(e.episode) = W_AsInt(a.episode.episode) then
+                startIdx = queue.Count() - 1
+            end if
+        end for
+    end for
+    if startIdx < 0 then return
+
+    newArgs = {}
+    for each k in a
+        newArgs[k] = a[k]
+    end for
+    newArgs.episodeQueue = queue
+    newArgs.episodeQueueIndex = startIdx
+    print "[Player] episodeQueue backfilled - "; queue.Count(); " eps, idx="; startIdx
+    m.queueInjectOnly = true
+    m.top.args = newArgs
 end sub
 
 sub startPlayback(url as String, fmt as String)
@@ -230,15 +314,16 @@ sub startPlayback(url as String, fmt as String)
         return
     end if
 
+    m.finishedRetries = 0
+    m.lastStallPos = -999
+
     cn = createObject("roSGNode", "ContentNode")
     cn.url = url
     if fmt = invalid or fmt = "" then fmt = U_StreamFormat(url)
     cn.streamFormat = fmt
     cn.title = m.title.text
     cn.live = false
-    playStart = m.startPosition
-    if playStart <= 0 then playStart = 5
-    cn.playStart = playStart
+    cn.playStart = m.startPosition
     cn.httpCertificatesFile = "common:/certs/ca-bundle.crt"
     if m.top.args.poster <> invalid then cn.HDPosterUrl = m.top.args.poster
 
@@ -314,7 +399,13 @@ sub onVideoState()
     end if
     if s = "playing" then
         m.status.text = ""
-        if not m.overlay.visible then m.video.setFocus(true)
+        ' Don't yank focus off a floating banner that's holding it so OK
+        ' can reach onKeyEvent (see updateNextEpBanner / updateSkipBanner);
+        ' e.g. unpausing via a banner's play toggle re-enters "playing"
+        ' while the banner is still up.
+        bannerFocused = (m.nextEpBanner <> invalid and m.nextEpBanner.visible and m.nextEpBanner.hasFocus())
+        bannerFocused = bannerFocused or (m.skipBanner <> invalid and m.skipBanner.visible and m.skipBanner.hasFocus())
+        if not m.overlay.visible and not bannerFocused then m.video.setFocus(true)
         ingestRendition()
         ingestAudio()
         if m.cues <> invalid and m.cues.Count() > 0 and m.capTimer <> invalid then m.capTimer.control = "start"
@@ -334,6 +425,47 @@ sub onVideoState()
         m.status.text = "Playback error: " + m.video.errorStr
         print "[Player] errorStr="; m.video.errorStr; " errorCode="; m.video.errorCode
     else if s = "finished" then
+        ' A "finished" far short of the reported duration is never a real
+        ' ending - it's a broken stream. Two flavors seen in the wild:
+        '  - movie mirrors whose manifest briefly reports a short/stale
+        '    duration on the first fetch, so the node flips to "finished"
+        '    seconds after playStart (pos near 0, dur plausible);
+        '  - mirrors serving a poisoned/zero-byte segment mid-playlist
+        '    (e.g. airflix/vaplayer's Snowpiercer S2 has a 0-byte first
+        '    segment) - the decoder hits it, signals end-of-stream, and
+        '    playback dies after the few buffered seconds, at ANY position.
+        ' Seeking forward and pressing play skips the bad segment, so
+        ' reproduce that recovery automatically. Refill the retry budget
+        ' whenever real progress was made since the last stall so one bad
+        ' patch mid-file doesn't exhaust it for a later one.
+        dur = W_AsInt(m.video.duration)
+        posSec = W_AsInt(m.video.position)
+        premature = (dur > 30 and posSec < 10) or (dur > 300 and posSec < dur - 120)
+        if premature then
+            if posSec > m.lastStallPos + 30 then m.finishedRetries = 0
+            m.lastStallPos = posSec
+            if m.finishedRetries < 3 then
+                m.finishedRetries = m.finishedRetries + 1
+                print "[Player] spurious finished at pos="; posSec; " dur="; dur; " retry="; m.finishedRetries
+                m.video.seek = posSec + 5
+                m.video.control = "play"
+                return
+            end if
+            ' Retries exhausted: treat as a dead mirror, not a finished
+            ' episode. Never mark watched or auto-advance off a broken
+            ' stream - fail over to another mirror for the SAME episode,
+            ' resuming where it died.
+            print "[Player] premature finished at pos="; posSec; " dur="; dur; " - mirror failover"
+            saveProgress(false)
+            a = m.top.args
+            if a <> invalid and a.mirrorHost <> invalid and a.mirrorHost <> "" then
+                W_RecordMirrorOutcome(a.mirrorHost, false)
+            end if
+            if startSameEpisodeFailover(posSec) then return
+            showOverlay()
+            m.status.text = "Stream failed partway through - try a different mirror."
+            return
+        end if
         saveProgress(true)
         if tryAutoAdvance() then return
         ' Stream ended and there's no next episode (or this is a movie).
@@ -416,6 +548,59 @@ function startEpisodeAdvance(nextEp as Object, nextIdx as Integer) as Boolean
     return true
 end function
 
+' --- Same-episode mirror failover ------------------------------------
+'
+' A stream that dies mid-episode (premature "finished" in onVideoState,
+' seek-forward retries exhausted) means THIS mirror's encode is broken -
+' not that the episode ended. Reuse the advance pipeline against the
+' CURRENT episode: fresh server list, current host excluded, playback
+' resumed at the position where the stream died. Hosts tried across
+' failover hops are remembered per-episode (m.failover) because the
+' m.advance state itself is torn down on every completeAdvance.
+function startSameEpisodeFailover(resumePos as Integer) as Boolean
+    a = m.top.args
+    if a = invalid then return false
+    if a.kind <> "tv" then return false
+    if a.episode = invalid then return false
+    if m.advance <> invalid then return false
+
+    epKey = ""
+    if a.episode.season <> invalid and a.episode.episode <> invalid then
+        epKey = a.episode.season.ToStr() + "x" + a.episode.episode.ToStr()
+    end if
+    if m.failover = invalid or m.failover.epKey <> epKey then
+        m.failover = { epKey: epKey, triedHosts: {}, hops: 0 }
+    end if
+    if m.failover.hops >= 4 then return false
+    m.failover.hops = m.failover.hops + 1
+    if a.mirrorHost <> invalid and a.mirrorHost <> "" then
+        m.failover.triedHosts[a.mirrorHost] = true
+    end if
+    tried = {}
+    for each h in m.failover.triedHosts
+        tried[h] = true
+    end for
+
+    idx = 0
+    if a.episodeQueueIndex <> invalid then idx = a.episodeQueueIndex
+    m.advance = {
+        ep:            a.episode
+        queueIdx:      idx
+        mirrors:       invalid
+        triedHosts:    tried
+        activeMirror:  invalid
+        preferredHost: ""
+        resumePos:     resumePos
+        sameEpisode:   true
+    }
+    clearActiveChapter()
+    m.video.control = "pause"
+    m.advanceStatus.text = "Stream failed - trying another mirror..."
+    m.advanceOverlay.visible = true
+    fetchAdvanceServers()
+    return true
+end function
+
 sub fetchAdvanceServers()
     a = m.top.args
     if a = invalid or m.advance = invalid then return
@@ -437,13 +622,15 @@ end sub
 sub onAdvanceServersResult()
     if m.advanceServersTask = invalid or m.advance = invalid then return
     res = m.advanceServersTask.result
+    epWord = "the next episode"
+    if m.advance.sameEpisode = true then epWord = "this episode"
     if res = invalid or res.mirrors = invalid or res.mirrors.Count() = 0 then
-        showAdvanceFailure("No mirrors available for the next episode.")
+        showAdvanceFailure("No mirrors available for " + epWord + ".")
         return
     end if
     m.advance.mirrors = res.mirrors
     if not advanceTryNextMirror() then
-        showAdvanceFailure("All mirrors failed for the next episode.")
+        showAdvanceFailure("All mirrors failed for " + epWord + ".")
     end if
 end sub
 
@@ -509,8 +696,10 @@ sub onAdvanceResolveResult()
         if m.advance.activeMirror <> invalid and m.advance.activeMirror.host <> invalid then
             W_RecordMirrorOutcome(m.advance.activeMirror.host, false)
         end if
+        epWord = "the next episode"
+        if m.advance.sameEpisode = true then epWord = "this episode"
         if not advanceTryNextMirror() then
-            showAdvanceFailure("All mirrors failed for the next episode.")
+            showAdvanceFailure("All mirrors failed for " + epWord + ".")
         end if
         return
     end if
@@ -549,7 +738,11 @@ sub completeAdvance(res as Object)
     end for
     newArgs.episode = epDict
     newArgs.episodeQueueIndex = m.advance.queueIdx
-    newArgs.startPosition = 0
+    ' Same-episode failover resumes where the broken stream died;
+    ' a real next-episode advance always starts from the top.
+    resumePos = 0
+    if m.advance.resumePos <> invalid then resumePos = m.advance.resumePos
+    newArgs.startPosition = resumePos
     newArgs.url = res.url
     newArgs.streamFormat = res.streamFormat
     newArgs.qualities = res.qualities
@@ -703,7 +896,16 @@ sub updateSkipBanner(posSec as Integer)
 
     ' If the user happens to be in the overlay when a chapter window
     ' opens, surface the skip option in the action bar immediately.
-    if m.overlay.visible then rebuildActionBar()
+    if m.overlay.visible then
+        rebuildActionBar()
+    else
+        ' Hold focus on the banner while it's up. A focused Video node
+        ' with enableUI=true consumes OK before it can bubble to
+        ' onKeyEvent, so without this the banner's OK is dead - same
+        ' quirk the next-ep banner works around. onKeyEvent routes OK
+        ' to performSkip and hands focus back on transport keys / fade.
+        m.skipBanner.setFocus(true)
+    end if
 end sub
 
 ' Tear down all skip-banner state. Cancels the 5s timer and any
@@ -717,10 +919,14 @@ sub clearActiveChapter()
     m.activeChapterKind = ""
     m.activeChapterIsCountdown = false
     m.bannerDismissed = false
+    bannerHadFocus = (m.skipBanner <> invalid and m.skipBanner.hasFocus())
     if m.skipBanner <> invalid then
         m.skipBanner.visible = false
         m.skipBanner.opacity = 1.0
     end if
+    ' If the banner was holding focus (see updateSkipBanner), return it
+    ' to the video so playback keys keep working after the window ends.
+    if bannerHadFocus and m.video <> invalid and m.overlay <> invalid and not m.overlay.visible then m.video.setFocus(true)
     if m.skipCountdown <> invalid then m.skipCountdown.visible = false
     if m.skipCountdownFill <> invalid then m.skipCountdownFill.width = 0
     if m.skipBannerTimer <> invalid then m.skipBannerTimer.control = "stop"
@@ -773,12 +979,24 @@ sub updateNextEpBanner(posSec as Integer)
     m.nextEpBanner.visible = true
     m.nextEpBannerShown = true
     m.nextEpTimer.control = "start"
+    ' The Video node's built-in trick-play UI (enableUI=true) consumes
+    ' OK before it can bubble to onKeyEvent, so with focus on the video
+    ' the banner is unselectable - OK would just pause. Hold focus on
+    ' the banner while it's up; onKeyEvent routes OK to the skip and
+    ' hands focus back for transport keys.
+    m.nextEpBanner.setFocus(true)
 end sub
 
-' 10-second banner timer fired: hide the floating button.
+' Banner timer fired: hide the floating button and hand focus back to
+' the video if the banner was holding it (it grabs focus on show so OK
+' can reach onKeyEvent past the Video node's built-in trick-play UI).
 ' m.nextEpActive stays true so the action-bar entry remains.
 sub onNextEpTimerFire()
-    if m.nextEpBanner <> invalid then m.nextEpBanner.visible = false
+    if m.nextEpBanner <> invalid then
+        hadFocus = m.nextEpBanner.hasFocus()
+        m.nextEpBanner.visible = false
+        if hadFocus and not m.overlay.visible then m.video.setFocus(true)
+    end if
 end sub
 
 ' User confirmed "Skip to Next Episode" - from either the floating
@@ -807,6 +1025,10 @@ sub onSkipBannerTimerFire()
     else
         m.bannerDismissed = true
         m.skipFadeAnim.control = "start"
+        ' Banner is fading out and will no longer accept input; return
+        ' focus to the video so trick play works again (the action-bar
+        ' entry still surfaces the skip for the rest of the window).
+        if m.skipBanner.hasFocus() and not m.overlay.visible then m.video.setFocus(true)
     end if
 end sub
 
@@ -1302,6 +1524,7 @@ sub onCcStyleChosen()
 end sub
 
 sub switchSource(url as String, fmt as String)
+    m.finishedRetries = 0
     cn = createObject("roSGNode", "ContentNode")
     cn.url = url
     if fmt = invalid or fmt = "" then fmt = U_StreamFormat(url)
@@ -1470,40 +1693,77 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         end if
         return true
     end if
-    ' Time-based next-ep banner: OK fires the skip immediately.
-    ' BACK is not intercepted here so it still exits the player normally.
+    ' Time-based next-ep banner. While visible the banner holds focus
+    ' (the Video node's built-in UI would otherwise consume OK), so
+    ' every key lands here: OK fires the skip, play still toggles
+    ' pause, and transport keys dismiss the banner and hand focus back
+    ' to the video so trick play keeps working (the action-bar entry
+    ' remains available for the rest of the episode). UP/DOWN fall
+    ' through to their usual open-the-overlay handlers, and BACK is not
+    ' intercepted so it still exits the player normally.
     if m.nextEpBanner <> invalid and m.nextEpBanner.visible and not m.overlay.visible then
         if key = "OK" then
             performNextEpSkip()
             return true
         end if
-    end if
-    ' Outro countdown: BACK lets the user finish the credits (cancels
-    ' the auto-advance, hides the banner, but keeps the chapter
-    ' active so the action-bar entry still works); OK advances
-    ' immediately. Both bypass the regular OK / BACK paths.
-    if m.activeChapterIsCountdown and not m.overlay.visible then
-        if key = "back" then
-            m.skipBanner.visible = false
-            m.skipBanner.opacity = 1.0
-            m.skipCountdown.visible = false
-            m.skipBannerTimer.control = "stop"
-            m.skipFadeAnim.control = "stop"
-            m.skipCountdownAnim.control = "stop"
-            m.activeChapterIsCountdown = false
-            m.bannerDismissed = true
+        if key = "play" then
+            if m.video.state = "playing" then
+                m.video.control = "pause"
+            else
+                m.video.control = "resume"
+            end if
             return true
         end if
+        if key = "left" or key = "right" or key = "rewind" or key = "fastforward" or key = "replay" then
+            m.nextEpBanner.visible = false
+            m.nextEpTimer.control = "stop"
+            m.video.setFocus(true)
+            return true
+        end if
+    end if
+    ' Chapter skip banner (Skip Intro / Skip Recap / outro "Play Next
+    ' Episode"). Like the next-ep banner it holds focus while visible so
+    ' OK reaches onKeyEvent past the Video node's built-in trick-play UI.
+    ' OK fires the skip; play toggles pause; BACK and transport keys
+    ' dismiss the prompt and hand focus back to the video. For an outro
+    ' countdown, dismissing also cancels the auto-advance but keeps the
+    ' chapter active so the action-bar entry still works (user watches
+    ' the credits). UP/DOWN fall through to the overlay handlers.
+    if m.skipBanner <> invalid and m.skipBanner.visible and m.skipBanner.hasFocus() and not m.overlay.visible then
         if key = "OK" then
             performSkip()
             return true
         end if
+        if key = "play" then
+            if m.video.state = "playing" then
+                m.video.control = "pause"
+            else
+                m.video.control = "resume"
+            end if
+            return true
+        end if
+        if key = "back" or key = "left" or key = "right" or key = "rewind" or key = "fastforward" or key = "replay" then
+            m.skipBanner.visible = false
+            m.skipBanner.opacity = 1.0
+            m.skipBannerTimer.control = "stop"
+            m.skipFadeAnim.control = "stop"
+            m.bannerDismissed = true
+            if m.activeChapterIsCountdown then
+                m.skipCountdown.visible = false
+                m.skipCountdownAnim.control = "stop"
+                m.activeChapterIsCountdown = false
+            end if
+            m.video.setFocus(true)
+            ' BACK is consumed (it dismissed the banner); a transport key
+            ' is consumed too - the next press reaches the now-focused
+            ' video. Either way don't let BACK bubble out of the player.
+            return true
+        end if
     end if
     if key = "OK" or key = "options" then
-        ' If the resolver gave us a chapter window and we're inside it,
-        ' OK fires the skip instead of opening the overlay. Banner is
-        ' only visible when there's a real chapter to skip, so this
-        ' path stays dormant for streams without chapter data.
+        ' Defensive fallback: if the banner is somehow visible without
+        ' focus (e.g. focus was pulled elsewhere) OK still skips. Dead
+        ' on-device when the video has focus (it eats OK), but harmless.
         if m.skipBanner.visible and m.activeChapter <> invalid and not m.overlay.visible then
             performSkip()
             return true
