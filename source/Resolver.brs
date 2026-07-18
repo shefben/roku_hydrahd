@@ -27,8 +27,16 @@ function R_ResolveEmbed(args as Object) as Object
     if args.refer <> invalid then refer = args.refer
     if refer = "" then refer = HC_OriginOf(embedUrl)
 
-    ' Direct passthrough - no need to spend cycles on resolution.
+    ' Direct passthrough - no need to spend cycles on resolution. Still
+    ' run the dead-lead-in probe for HLS (it skips R_EnrichResult); MP4
+    ' has no segments. Fail-open: 0 on any probe failure.
     if U_LooksHls(embedUrl) or U_LooksMp4(embedUrl) then
+        lead = 0
+        if U_LooksHls(embedUrl) then
+            psess = HC_NewSession()
+            lead = RP_HlsLeadSkip(psess, "", embedUrl, refer)
+            HC_Close(psess)
+        end if
         return {
             url: embedUrl
             streamFormat: U_StreamFormat(embedUrl)
@@ -37,6 +45,7 @@ function R_ResolveEmbed(args as Object) as Object
             chapters: []
             referer: refer
             userAgent: ""
+            leadSkip: lead
         }
     end if
 
@@ -110,6 +119,18 @@ function R_EnrichResult(raw as Object, args as Object, refer as String, session 
         if raw.chapters <> invalid and type(raw.chapters) = "roArray" then existingChapters = raw.chapters
         if existingChapters = invalid or existingChapters.Count() = 0 then
             raw.chapters = HM_ExtractChaptersHls(streamUrl, refUrl, session)
+        end if
+
+        ' Universal dead-lead-in probe. Some CDNs serve a 0-byte first
+        ' media segment (Roku decodes nothing there and reports "finished"
+        ' a few seconds in). Probe the first segment once and, when it's
+        ' empty, record how many seconds PlayerView should skip on start
+        ' so playback opens past it instead of dying then seeking. Returns
+        ' 0 (no skip) for healthy streams and on any probe failure, so
+        ' good mirrors are never penalized. Providers don't set leadSkip
+        ' themselves, so this is the single source.
+        if raw.leadSkip = invalid then
+            raw.leadSkip = RP_HlsLeadSkip(session, "", streamUrl, refUrl)
         end if
     end if
 
