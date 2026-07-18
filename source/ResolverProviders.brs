@@ -337,10 +337,79 @@ function RP_ResolveAirflix(embedUrl as String, refer as String, session as Objec
             chapters: []
             referer: apiReferer
             userAgent: ""
+            ' Seconds of dead lead-in to skip on start. This CDN
+            ' (vaplayer/passiveprofitengine) sometimes serves a 0-byte
+            ' first media segment - Roku decodes nothing there and reports
+            ' "finished" a few seconds in. Probing the first segment now
+            ' lets PlayerView open just past it instead of dying then
+            ' seeking. 0 = no dead lead-in, start normally.
+            leadSkip: RP_AirflixLeadSkip(session, playlist.body, streamUrl, apiReferer)
         }
     end for
 
     return invalid
+end function
+
+' Detect a poisoned (0-byte) first media segment and return how many
+' seconds to skip so playback opens on the first real segment. Returns 0
+' when the first segment has data (the common case - no skip) or when we
+' can't tell (fail open: don't skip a healthy stream). masterBody is the
+' already-fetched master playlist; masterUrl is its URL for resolving
+' the variant path.
+function RP_AirflixLeadSkip(session as Object, masterBody as String, masterUrl as String, referer as String) as Integer
+    if masterBody = "" then return 0
+    ' First non-comment line of the master = a variant playlist path.
+    variantRef = ""
+    for each line in masterBody.Split(Chr(10))
+        t = U_Trim(line)
+        if t = "" then continue for
+        if Left(t, 1) = "#" then continue for
+        variantRef = t
+        exit for
+    end for
+    if variantRef = "" then return 0
+    variantUrl = U_AbsUrl(variantRef, HC_OriginOf(masterUrl))
+    if variantUrl = "" then return 0
+
+    vres = HC_Get(session, variantUrl, { "Referer": referer }, 5000)
+    if vres = invalid or vres.body = "" then return 0
+    if Left(vres.body, 7) <> "#EXTM3U" then return 0
+
+    ' Walk the variant: capture the first EXTINF duration and the URL of
+    ' the segment immediately after it.
+    firstDur = 0.0
+    firstSeg = ""
+    pendingDur = 0.0
+    durRe = CreateObject("roRegex", "#EXTINF:([0-9.]+)", "i")
+    for each line in vres.body.Split(Chr(10))
+        t = U_Trim(line)
+        if t = "" then continue for
+        if Left(t, 1) = "#" then
+            dm = durRe.match(t)
+            if dm <> invalid and dm.Count() >= 2 then pendingDur = Val(dm[1])
+            continue for
+        end if
+        firstSeg = U_AbsUrl(t, HC_OriginOf(variantUrl))
+        firstDur = pendingDur
+        exit for
+    end for
+    if firstSeg = "" then return 0
+
+    ' Probe just the first two bytes. A real segment returns >=1 byte; the
+    ' poisoned one returns an empty body. If the fetch itself fails, fail
+    ' open (don't skip).
+    pres = HC_GetRange(session, firstSeg, { "Referer": referer }, "bytes=0-1", 5000)
+    if pres = invalid then return 0
+    if pres.status <= 0 then return 0
+    if Len(pres.body) > 0 then return 0
+
+    ' Empty first segment confirmed - skip past it (its EXTINF duration
+    ' rounded up, +2s margin so we land inside the next segment).
+    skip = Int(firstDur + 0.999) + 2
+    if skip < 4 then skip = 8
+    if skip > 30 then skip = 30
+    print "[airflix] poisoned 0-byte first segment - leadSkip="; skip
+    return skip
 end function
 
 ' --- Phase 2: vidrock / vidsrc.vip -----------------------------------
