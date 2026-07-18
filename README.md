@@ -1,3 +1,7 @@
+> [!WARNING]
+> Some mirrors have a empty/corrupted section at the bbegining of the stream i believe to force people to use the website (to see ad's).  i am working on figuring out how to skip past this so it can continue the stream instead of automatically selecting another mirror.
+
+
 # HydraHD - Roku Channel
 
 A Roku channel that browses and plays movies + TV shows from
