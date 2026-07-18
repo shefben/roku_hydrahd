@@ -329,6 +329,9 @@ function RP_ResolveAirflix(embedUrl as String, refer as String, session as Objec
         playlist = HC_Get(session, streamUrl, { "Referer": apiReferer }, 6000)
         if playlist = invalid or playlist.body = "" then continue for
         if Left(playlist.body, 7) <> "#EXTM3U" then continue for
+        ' Dead-lead-in (0-byte first segment) detection is handled
+        ' uniformly for every HLS provider in R_EnrichResult, so no
+        ' per-provider leadSkip probe here.
         return {
             url: streamUrl
             streamFormat: "hls"
@@ -337,51 +340,73 @@ function RP_ResolveAirflix(embedUrl as String, refer as String, session as Objec
             chapters: []
             referer: apiReferer
             userAgent: ""
-            ' Seconds of dead lead-in to skip on start. This CDN
-            ' (vaplayer/passiveprofitengine) sometimes serves a 0-byte
-            ' first media segment - Roku decodes nothing there and reports
-            ' "finished" a few seconds in. Probing the first segment now
-            ' lets PlayerView open just past it instead of dying then
-            ' seeking. 0 = no dead lead-in, start normally.
-            leadSkip: RP_AirflixLeadSkip(session, playlist.body, streamUrl, apiReferer)
         }
     end for
 
     return invalid
 end function
 
-' Detect a poisoned (0-byte) first media segment and return how many
-' seconds to skip so playback opens on the first real segment. Returns 0
-' when the first segment has data (the common case - no skip) or when we
-' can't tell (fail open: don't skip a healthy stream). masterBody is the
-' already-fetched master playlist; masterUrl is its URL for resolving
-' the variant path.
-function RP_AirflixLeadSkip(session as Object, masterBody as String, masterUrl as String, referer as String) as Integer
-    if masterBody = "" then return 0
-    ' First non-comment line of the master = a variant playlist path.
-    variantRef = ""
-    for each line in masterBody.Split(Chr(10))
+' Detect a poisoned (0-byte) first media segment on ANY HLS stream and
+' return how many seconds to skip so playback opens on the first real
+' segment. Returns 0 when the first segment has data (the common case -
+' no skip) or when we can't tell (fail open: never skip a healthy
+' stream). Provider-agnostic - called once for every HLS result from
+' R_EnrichResult. Handles both master playlists (descends one level to
+' the first variant) and media playlists served directly.
+'   masterBody: the playlist body if already fetched ("" to fetch here).
+'   masterUrl:  the playlist URL (for resolving relative variant/segment
+'               refs and for fetching when masterBody is "").
+function RP_HlsLeadSkip(session as Object, masterBody as String, masterUrl as String, referer as String) as Integer
+    if masterUrl = "" then return 0
+    body = masterBody
+    url = masterUrl
+    if body = "" then
+        r = HC_Get(session, url, { "Referer": referer }, 5000)
+        if r = invalid or r.body = "" then return 0
+        body = r.body
+    end if
+    if Left(body, 7) <> "#EXTM3U" then return 0
+
+    ' Media playlist served directly (#EXTINF, no variant streams): probe
+    ' it and we're done.
+    if Instr(1, body, "#EXT-X-STREAM-INF") <= 0 then
+        return RP_ProbeMediaPlaylist(session, body, url, referer)
+    end if
+
+    ' Master playlist: the 0-byte poison is per-variant (a mirror can ship
+    ' a healthy 360p rendition but an empty first segment in the 720p one),
+    ' and PlayerView opens directly on the pref-selected rendition (default
+    ' "best" = highest), so we must check EVERY variant, not just the
+    ' first. Any variant with an empty first segment means the stream can
+    ' die at t=0, so return the skip. Bounded so a many-rendition master
+    ' can't fan out unboundedly.
+    checked = 0
+    for each line in body.Split(Chr(10))
         t = U_Trim(line)
         if t = "" then continue for
         if Left(t, 1) = "#" then continue for
-        variantRef = t
-        exit for
+        vurl = U_AbsUrl(t, HC_OriginOf(url))
+        if vurl = "" then continue for
+        vres = HC_Get(session, vurl, { "Referer": referer }, 5000)
+        if vres <> invalid and vres.body <> "" and Left(vres.body, 7) = "#EXTM3U" then
+            skip = RP_ProbeMediaPlaylist(session, vres.body, vurl, referer)
+            if skip > 0 then return skip
+        end if
+        checked = checked + 1
+        if checked >= 8 then exit for
     end for
-    if variantRef = "" then return 0
-    variantUrl = U_AbsUrl(variantRef, HC_OriginOf(masterUrl))
-    if variantUrl = "" then return 0
+    return 0
+end function
 
-    vres = HC_Get(session, variantUrl, { "Referer": referer }, 5000)
-    if vres = invalid or vres.body = "" then return 0
-    if Left(vres.body, 7) <> "#EXTM3U" then return 0
-
-    ' Walk the variant: capture the first EXTINF duration and the URL of
-    ' the segment immediately after it.
+' Given a media playlist body, probe its first segment. Returns seconds
+' to skip when that segment is a 0-byte poison, else 0 (healthy, or on
+' any probe failure - fail open).
+function RP_ProbeMediaPlaylist(session as Object, mediaBody as String, mediaUrl as String, referer as String) as Integer
     firstDur = 0.0
     firstSeg = ""
     pendingDur = 0.0
     durRe = CreateObject("roRegex", "#EXTINF:([0-9.]+)", "i")
-    for each line in vres.body.Split(Chr(10))
+    for each line in mediaBody.Split(Chr(10))
         t = U_Trim(line)
         if t = "" then continue for
         if Left(t, 1) = "#" then
@@ -389,15 +414,14 @@ function RP_AirflixLeadSkip(session as Object, masterBody as String, masterUrl a
             if dm <> invalid and dm.Count() >= 2 then pendingDur = Val(dm[1])
             continue for
         end if
-        firstSeg = U_AbsUrl(t, HC_OriginOf(variantUrl))
+        firstSeg = U_AbsUrl(t, HC_OriginOf(mediaUrl))
         firstDur = pendingDur
         exit for
     end for
     if firstSeg = "" then return 0
 
     ' Probe just the first two bytes. A real segment returns >=1 byte; the
-    ' poisoned one returns an empty body. If the fetch itself fails, fail
-    ' open (don't skip).
+    ' poisoned one returns an empty body. Fetch failure -> fail open.
     pres = HC_GetRange(session, firstSeg, { "Referer": referer }, "bytes=0-1", 5000)
     if pres = invalid then return 0
     if pres.status <= 0 then return 0
@@ -408,7 +432,7 @@ function RP_AirflixLeadSkip(session as Object, masterBody as String, masterUrl a
     skip = Int(firstDur + 0.999) + 2
     if skip < 4 then skip = 8
     if skip > 30 then skip = 30
-    print "[airflix] poisoned 0-byte first segment - leadSkip="; skip
+    print "[hls] poisoned 0-byte first segment - leadSkip="; skip
     return skip
 end function
 

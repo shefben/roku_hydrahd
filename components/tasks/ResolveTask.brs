@@ -26,6 +26,15 @@ sub doWork()
 
     if U_LooksHls(embedUrl) or U_LooksMp4(embedUrl) then
         print "[ResolveTask] direct passthrough"
+        ' Direct .m3u8 embeds skip R_EnrichResult, so run the dead-lead-in
+        ' probe here too (HLS only - MP4 has no segments). Fail-open: 0 on
+        ' any probe failure so a good stream is never delayed/blocked.
+        lead = 0
+        if U_LooksHls(embedUrl) then
+            sess = HC_NewSession()
+            lead = RP_HlsLeadSkip(sess, "", embedUrl, m.top.refer)
+            HC_Close(sess)
+        end if
         m.top.result = {
             url: embedUrl
             streamFormat: U_StreamFormat(embedUrl)
@@ -33,6 +42,7 @@ sub doWork()
             subtitles: []
             referer: ""
             userAgent: ""
+            leadSkip: lead
         }
         return
     end if
@@ -148,6 +158,11 @@ function resolveBestEffort(embedUrl as String) as Object
     hlsRe = CreateObject("roRegex", "(https?://[^" + chr(34) + "'\\\s>]+\.m3u8[^" + chr(34) + "'\\\s>]*)", "i")
     h = hlsRe.match(html)
     if h <> invalid and h.Count() >= 2 then
+        ' Best-effort scrape bypasses R_EnrichResult, so probe the
+        ' dead-lead-in here too. Fail-open: 0 on any probe failure.
+        besess = HC_NewSession()
+        lead = RP_HlsLeadSkip(besess, "", h[1], m.top.refer)
+        HC_Close(besess)
         return {
             url: h[1]
             streamFormat: "hls"
@@ -155,6 +170,7 @@ function resolveBestEffort(embedUrl as String) as Object
             subtitles: extractSubs(html)
             referer: m.top.refer
             userAgent: ""
+            leadSkip: lead
         }
     end if
 
