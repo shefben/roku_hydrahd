@@ -62,8 +62,6 @@ sub init()
     ' Position of the last premature "finished" stall; lets the retry
     ' budget refill once playback makes real progress past a bad patch.
     m.lastStallPos = -999
-    ' Per-episode same-mirror-failover state - see startSameEpisodeFailover.
-    m.failover = invalid
 
     ' Skip Intro / Play Next Episode banner state. Two distinct
     ' visual modes share the skipBanner node:
@@ -198,6 +196,15 @@ sub onArgs()
         m.startPosition = W_AsInt(a.startPosition)
     else
         m.startPosition = 0
+    end if
+    ' Proactive dead-lead-in skip. The resolver probes the first media
+    ' segment and, when it's the 0-byte poison this CDN sometimes serves,
+    ' reports leadSkip seconds. Open just past it so playback never dies
+    ' at 0:00 then seeks. Only applies to a fresh start (not a resume),
+    ' so mirrors without the poison (leadSkip=0) start normally at 0.
+    if m.startPosition <= 0 and a.leadSkip <> invalid and W_AsInt(a.leadSkip) > 0 then
+        m.startPosition = W_AsInt(a.leadSkip)
+        print "[Player] applying leadSkip - opening at "; m.startPosition; "s"
     end if
     m.lastSavedPos = -999
     m.progressSaved = false
@@ -434,36 +441,37 @@ sub onVideoState()
         '    (e.g. airflix/vaplayer's Snowpiercer S2 has a 0-byte first
         '    segment) - the decoder hits it, signals end-of-stream, and
         '    playback dies after the few buffered seconds, at ANY position.
-        ' Seeking forward and pressing play skips the bad segment, so
-        ' reproduce that recovery automatically. Refill the retry budget
-        ' whenever real progress was made since the last stall so one bad
-        ' patch mid-file doesn't exhaust it for a later one.
+        ' The mirror is fine - just skip the bad patch. Seek forward and
+        ' keep the SAME mirror; never switch to a worse one over a few
+        ' junk segments. If a seek lands on another dead spot the position
+        ' won't have advanced, so bump the jump distance (10 -> 20 -> 30..)
+        ' to punch straight through a run of bad segments. Any real
+        ' progress since the last stall resets the counter, so each bad
+        ' patch gets its own budget.
         dur = W_AsInt(m.video.duration)
         posSec = W_AsInt(m.video.position)
         premature = (dur > 30 and posSec < 10) or (dur > 300 and posSec < dur - 120)
         if premature then
-            if posSec > m.lastStallPos + 30 then m.finishedRetries = 0
+            if posSec > m.lastStallPos + 15 then m.finishedRetries = 0
             m.lastStallPos = posSec
-            if m.finishedRetries < 3 then
+            if m.finishedRetries < 40 then
                 m.finishedRetries = m.finishedRetries + 1
-                print "[Player] spurious finished at pos="; posSec; " dur="; dur; " retry="; m.finishedRetries
-                m.video.seek = posSec + 5
-                m.video.control = "play"
-                return
+                jump = 10 * m.finishedRetries
+                if jump > 120 then jump = 120
+                target = posSec + jump
+                if target < dur - 10 then
+                    print "[Player] skip bad patch at pos="; posSec; " dur="; dur; " jump="; jump; " retry="; m.finishedRetries
+                    m.video.seek = target
+                    m.video.control = "play"
+                    return
+                end if
             end if
-            ' Retries exhausted: treat as a dead mirror, not a finished
-            ' episode. Never mark watched or auto-advance off a broken
-            ' stream - fail over to another mirror for the SAME episode,
-            ' resuming where it died.
-            print "[Player] premature finished at pos="; posSec; " dur="; dur; " - mirror failover"
+            ' Only here if seeking forward can't recover (right at the end,
+            ' or 40 straight dead seeks). Stay on the mirror - just stop.
+            print "[Player] premature finished unrecoverable at pos="; posSec; " dur="; dur
             saveProgress(false)
-            a = m.top.args
-            if a <> invalid and a.mirrorHost <> invalid and a.mirrorHost <> "" then
-                W_RecordMirrorOutcome(a.mirrorHost, false)
-            end if
-            if startSameEpisodeFailover(posSec) then return
             showOverlay()
-            m.status.text = "Stream failed partway through - try a different mirror."
+            m.status.text = "Trouble with this part of the stream - fast-forward to continue."
             return
         end if
         saveProgress(true)
@@ -544,59 +552,6 @@ function startEpisodeAdvance(nextEp as Object, nextIdx as Integer) as Boolean
 
     ' Always fetch a fresh per-episode server list for the new S/E.
     ' advanceTryNextMirror() will pick the preferred host (if any) first.
-    fetchAdvanceServers()
-    return true
-end function
-
-' --- Same-episode mirror failover ------------------------------------
-'
-' A stream that dies mid-episode (premature "finished" in onVideoState,
-' seek-forward retries exhausted) means THIS mirror's encode is broken -
-' not that the episode ended. Reuse the advance pipeline against the
-' CURRENT episode: fresh server list, current host excluded, playback
-' resumed at the position where the stream died. Hosts tried across
-' failover hops are remembered per-episode (m.failover) because the
-' m.advance state itself is torn down on every completeAdvance.
-function startSameEpisodeFailover(resumePos as Integer) as Boolean
-    a = m.top.args
-    if a = invalid then return false
-    if a.kind <> "tv" then return false
-    if a.episode = invalid then return false
-    if m.advance <> invalid then return false
-
-    epKey = ""
-    if a.episode.season <> invalid and a.episode.episode <> invalid then
-        epKey = a.episode.season.ToStr() + "x" + a.episode.episode.ToStr()
-    end if
-    if m.failover = invalid or m.failover.epKey <> epKey then
-        m.failover = { epKey: epKey, triedHosts: {}, hops: 0 }
-    end if
-    if m.failover.hops >= 4 then return false
-    m.failover.hops = m.failover.hops + 1
-    if a.mirrorHost <> invalid and a.mirrorHost <> "" then
-        m.failover.triedHosts[a.mirrorHost] = true
-    end if
-    tried = {}
-    for each h in m.failover.triedHosts
-        tried[h] = true
-    end for
-
-    idx = 0
-    if a.episodeQueueIndex <> invalid then idx = a.episodeQueueIndex
-    m.advance = {
-        ep:            a.episode
-        queueIdx:      idx
-        mirrors:       invalid
-        triedHosts:    tried
-        activeMirror:  invalid
-        preferredHost: ""
-        resumePos:     resumePos
-        sameEpisode:   true
-    }
-    clearActiveChapter()
-    m.video.control = "pause"
-    m.advanceStatus.text = "Stream failed - trying another mirror..."
-    m.advanceOverlay.visible = true
     fetchAdvanceServers()
     return true
 end function
@@ -747,6 +702,11 @@ sub completeAdvance(res as Object)
     newArgs.streamFormat = res.streamFormat
     newArgs.qualities = res.qualities
     newArgs.subtitles = res.subtitles
+    if res.leadSkip <> invalid then
+        newArgs.leadSkip = res.leadSkip
+    else
+        newArgs.leadSkip = 0
+    end if
     referer = ""
     if res.referer <> invalid then referer = res.referer
     userAgent = ""

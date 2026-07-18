@@ -326,9 +326,11 @@ function R_NormalizeResult(raw as Object, defaultRefer as String) as Object
         chapters: []
         referer: ""
         userAgent: ""
+        leadSkip: 0
     }
     if raw = invalid then return out
     if raw.url <> invalid then out.url = raw.url
+    if raw.leadSkip <> invalid then out.leadSkip = raw.leadSkip
     if raw.streamFormat <> invalid and raw.streamFormat <> "" then
         out.streamFormat = raw.streamFormat
     else if out.url <> "" then

@@ -262,7 +262,8 @@ sub onResolved()
         if m.autoCascade then
             if tryNextUntried() then return
             m.autoCascade = false
-            m.status.text = "All mirrors are failing - try again later."
+            m.status.text = "Some mirrors failed - pick any one to try it again."
+            restoreGridFocus()
             return
         end if
         ' First failure: offer the cascade once, only if there are other
@@ -272,7 +273,8 @@ sub onResolved()
             promptAutoCascade()
             return
         end if
-        m.status.text = "All mirrors are failing - try again later."
+        m.status.text = "That mirror failed - pick another from the list."
+        restoreGridFocus()
         return
     end if
     if m.activeMirror <> invalid then W_RecordMirrorOutcome(m.activeMirror.host, true)
@@ -301,6 +303,7 @@ sub onResolved()
     end if
     if m.args.episode <> invalid then playerArgs.episode = m.args.episode
     if m.args.startPosition <> invalid then playerArgs.startPosition = m.args.startPosition
+    if res.leadSkip <> invalid then playerArgs.leadSkip = res.leadSkip
     if m.activeMirror <> invalid then
         if m.activeMirror.host <> invalid then playerArgs.mirrorHost = m.activeMirror.host
         ' mirrorLink + mirrorName are persisted in saveProgress so the
@@ -375,9 +378,23 @@ sub onCascadeDialogButton()
         m.status.text = "Trying remaining mirrors..."
         if not tryNextUntried() then
             m.autoCascade = false
-            m.status.text = "All mirrors are failing - try again later."
+            m.status.text = "Some mirrors failed - pick any one to try it again."
+            restoreGridFocus()
         end if
     else
-        m.status.text = "Could not resolve a direct stream from this mirror. Try another."
+        m.status.text = "Pick any mirror from the list to try it."
+        restoreGridFocus()
+    end if
+end sub
+
+' Return focus to the mirror grid after a dialog or a failed resolve so
+' the user can always move through and re-pick mirrors. Every mirror
+' stays in the list - nothing is ever removed, even after it fails - so
+' the user can retry a partially-working mirror or choose a different
+' one. Without this the grid can be left focusless after a Dialog closes
+' and arrow keys / OK do nothing.
+sub restoreGridFocus()
+    if m.grid <> invalid and m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then
+        m.grid.setFocus(true)
     end if
 end sub

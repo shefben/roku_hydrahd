@@ -128,6 +128,7 @@ function resolveViaService(resolver as String, embedUrl as String) as Object
         chapters: []
         referer: ""
         userAgent: ""
+        leadSkip: 0
     }
     if json.streamFormat <> invalid then out.streamFormat = json.streamFormat
     if out.streamFormat = "" then out.streamFormat = U_StreamFormat(out.url)
@@ -136,6 +137,7 @@ function resolveViaService(resolver as String, embedUrl as String) as Object
     if json.chapters <> invalid then out.chapters = json.chapters
     if json.referer <> invalid then out.referer = json.referer
     if json.userAgent <> invalid then out.userAgent = json.userAgent
+    if json.leadSkip <> invalid then out.leadSkip = json.leadSkip
     return out
 end function
 
