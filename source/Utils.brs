@@ -1,8 +1,38 @@
 ' Utils.brs - String, regex, and JSON helpers reused by every screen.
 
+function U_DefaultBaseUrl() as String
+    return "https://hydrahd.ws"
+end function
+
+function U_NormalizeBaseUrl(base as String) as String
+    base = U_Trim(base)
+    while Right(base, 1) = "/" and Len(base) > 0
+        base = Left(base, Len(base) - 1)
+    end while
+    retired = CreateObject("roRegex", "^https?://(?:www\.)?hydrahd\.ru$", "i")
+    if base = "" or retired.IsMatch(base) then return U_DefaultBaseUrl()
+    return base
+end function
+
+' Rebase saved catalog links after domain changes; leave provider URLs alone.
+function U_CatalogUrl(url as String) as String
+    if url = invalid or url = "" then return ""
+    base = U_NormalizeBaseUrl(U_PrefDefault("baseUrl", U_DefaultBaseUrl()))
+    known = CreateObject("roRegex", "^https?://(?:www\.)?hydrahd\.(?:ru|ws|com|io|cc|ac|me)(?=/|$)", "i")
+    if known.IsMatch(url) then return known.Replace(url, base)
+    return U_AbsUrl(url, base)
+end function
+
+' Registry identity stays in the original namespace so existing favorites and
+' resume positions survive the move. This string is a key, never a fetch URL.
+function U_CatalogIdentity(url as String) as String
+    known = CreateObject("roRegex", "^https?://(?:www\.)?hydrahd\.(?:ru|ws|com|io|cc|ac|me)(?=/|$)", "i")
+    return known.Replace(url, "https://hydrahd.ru")
+end function
+
 function U_Trim(s as String) as String
     if s = invalid then return ""
-    re = CreateObject("roRegex", "^\s+|\s+$", "g")
+    re = CreateObject("roRegex", "^\s+|\s+$", "")
     return re.replaceAll(s, "")
 end function
 
@@ -20,7 +50,7 @@ function U_HtmlDecode(s as String) as String
     out = out.Replace("&hellip;", "...")
     out = out.Replace("&mdash;", "-")
     out = out.Replace("&ndash;", "-")
-    re = CreateObject("roRegex", "&#(\d{1,5});", "g")
+    re = CreateObject("roRegex", "&#(\d{1,5});", "")
     matches = re.matchAll(out)
     if matches <> invalid then
         for each mt in matches
@@ -35,23 +65,24 @@ end function
 
 function U_StripTags(s as String) as String
     if s = invalid then return ""
-    re = CreateObject("roRegex", "<[^>]+>", "g")
+    re = CreateObject("roRegex", "<[^>]+>", "")
     return U_Trim(re.replaceAll(s, ""))
 end function
 
 function U_FirstMatch(haystack as String, pattern as String) as String
     re = CreateObject("roRegex", pattern, "is")
-    m = re.match(haystack)
-    if m <> invalid and m.Count() >= 2 then return m[1]
+    ' m is the task/view context, not a safe local name for match results.
+    found = re.match(haystack)
+    if found <> invalid and found.Count() >= 2 then return found[1]
     return ""
 end function
 
 function U_AllMatches(haystack as String, pattern as String) as Object
     re = CreateObject("roRegex", pattern, "is")
     out = []
-    m = re.matchAll(haystack)
-    if m = invalid then return out
-    return m
+    found = re.matchAll(haystack)
+    if found = invalid then return out
+    return found
 end function
 
 function U_UrlEncode(s as String) as String

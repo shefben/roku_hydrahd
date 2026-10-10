@@ -91,6 +91,17 @@
         </Group>
         <Timer id="nextEpTimer" duration="30.0" repeat="false" />
 
+        <!-- Rate-limit cooldown timer. The vaplayer/airflix CDNs
+             (profitablecreatorvault, influencerstrategygroup, putgate,
+             authenticbrandbuilders, ...) cap requests per IP (~45 in a
+             ~10s window, then HTTP 429/503). Roku's Video node can't
+             retry a 429, so a startup-burst 429 ends the stream a few
+             seconds in. The window clears in ~10s, so on a premature
+             stop we pause, wait this out, and resume at the SAME
+             position instead of seeking forward (which would spend more
+             of the budget). See onVideoState / onRateLimitTimerFire. -->
+        <Timer id="rateLimitTimer" duration="12.0" repeat="false" />
+
         <!-- "Loading next episode..." overlay used during in-place
              episode advance. Stays inside PlayerView so the user
              never bounces back to MirrorPicker. -->

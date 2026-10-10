@@ -104,7 +104,7 @@ end sub
 function resolveInChannel() as Object
     args = {
         embedUrl: m.top.embedUrl
-        refer:    m.top.refer
+        refer:    U_CatalogUrl(m.top.refer)
         kind:     m.top.kind
         imdb:     m.top.imdb
         tmdb:     m.top.tmdb
@@ -124,7 +124,7 @@ function resolveViaService(resolver as String, embedUrl as String) as Object
         qs = qs + "&season=" + m.top.season.ToStr()
         qs = qs + "&episode=" + m.top.episode.ToStr()
     end if
-    if m.top.refer <> "" then qs = qs + "&refer=" + U_UrlEncode(m.top.refer)
+    if m.top.refer <> "" then qs = qs + "&refer=" + U_UrlEncode(U_CatalogUrl(m.top.refer))
     cid = U_ClientId()
     if cid <> "" then qs = qs + "&cid=" + U_UrlEncode(cid)
     json = HA_GetJson(resolver + "/resolve" + qs)

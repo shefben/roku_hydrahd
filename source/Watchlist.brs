@@ -19,8 +19,22 @@ function W_Section() as Object
 end function
 
 function W_ItemKey(imdb as String, href as String) as String
-    if href <> invalid and href <> "" then return href
+    if href <> invalid and href <> "" then return U_CatalogIdentity(href)
     if imdb <> invalid and imdb <> "" then return imdb
+    return ""
+end function
+
+' Users may have switched to an official backup domain before this update.
+' Read their existing keys as aliases rather than moving or discarding data.
+function W_FindRegistryKey(reg as Object, key as String) as String
+    if reg.Exists(key) then return key
+    if Instr(1, key, "https://hydrahd.ru/") = 0 then return ""
+    for each suffix in ["ru", "ws", "com", "io", "cc", "ac", "me"]
+        for each prefix in ["https://hydrahd.", "http://hydrahd.", "https://www.hydrahd.", "http://www.hydrahd."]
+            aliasKey = key.Replace("https://hydrahd.ru/", prefix + suffix + "/")
+            if reg.Exists(aliasKey) then return aliasKey
+        end for
+    end for
     return ""
 end function
 
@@ -45,7 +59,8 @@ end function
 function W_Read(key as String) as Object
     if key = "" then return invalid
     reg = W_Section()
-    if not reg.Exists(key) then return invalid
+    key = W_FindRegistryKey(reg, key)
+    if key = "" then return invalid
     raw = reg.Read(key)
     if raw = invalid or raw = "" then return invalid
     parsed = ParseJson(raw)
@@ -368,7 +383,7 @@ end function
 function W_IsFavorite(imdb as String, href as String) as Boolean
     k = W_ItemKey(imdb, href)
     if k = "" then return false
-    return W_FavSection().Exists(k)
+    return W_FindRegistryKey(W_FavSection(), k) <> ""
 end function
 
 sub W_AddFavorite(ctx as Object)
@@ -393,6 +408,8 @@ sub W_AddFavorite(ctx as Object)
     if ctx.tmdb   <> invalid then payload.tmdb   = ctx.tmdb
     if ctx.kind   <> invalid then payload.kind   = ctx.kind
     reg = W_FavSection()
+    existingKey = W_FindRegistryKey(reg, k)
+    if existingKey <> "" then k = existingKey
     reg.Write(k, FormatJson(payload))
     reg.Flush()
     S_QueuePushNow()
@@ -402,8 +419,12 @@ sub W_RemoveFavorite(imdb as String, href as String)
     k = W_ItemKey(imdb, href)
     if k = "" then return
     reg = W_FavSection()
-    if reg.Exists(k) then
-        reg.Delete(k)
+    existingKey = W_FindRegistryKey(reg, k)
+    if existingKey <> "" then
+        while existingKey <> ""
+            if not reg.Delete(existingKey) then exit while
+            existingKey = W_FindRegistryKey(reg, k)
+        end while
         reg.Flush()
         S_QueuePushNow()
     end if

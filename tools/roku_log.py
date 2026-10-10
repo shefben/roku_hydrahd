@@ -10,7 +10,7 @@ Default target is 192.168.3.2 (the TV in the user's setup).
 
 Usage:
   python roku_log.py                     # defaults
-  python roku_log.py --host 192.168.3.5  # different TV
+  python roku_log.py --host 192.168.3.13  # different TV
   python roku_log.py --log roku.log      # custom log file
   python roku_log.py --no-stdout         # only write to file
 """
@@ -26,7 +26,7 @@ import socket
 import sys
 import time
 
-DEFAULT_HOST = "192.168.3.7"
+DEFAULT_HOST = "192.168.3.13"
 DEFAULT_PORT = 8085
 DEFAULT_LOG = "roku_debug.log"
 RECONNECT_MIN = 1.0

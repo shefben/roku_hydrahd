@@ -47,9 +47,9 @@ end sub
 ' U_DefaultResolverUrl() and used whenever the registry slot is empty.
 sub seedDefaults()
     reg = CreateObject("roRegistrySection", "HydraHD")
-    if not reg.Exists("baseUrl") then
-        reg.Write("baseUrl", "https://hydrahd.ru")
-    end if
+    base = U_DefaultBaseUrl()
+    if reg.Exists("baseUrl") then base = U_NormalizeBaseUrl(reg.Read("baseUrl"))
+    reg.Write("baseUrl", base)
     if not reg.Exists("resolverUrl") then
         reg.Write("resolverUrl", "http://192.168.3.180:8787")
     end if

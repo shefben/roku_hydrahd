@@ -194,6 +194,7 @@ function R_DispatchByHost(embedUrl as String, refer as String, session as Object
     if Instr(1, host, "autoembed") > 0 then return RP_ResolveAutoembed(embedUrl, refer, session)
 
     if Instr(1, host, "xpass.top") > 0 then return RP_ResolveXpass(embedUrl, refer, session)
+    if host = "player.vidlove.cc" then return RP_ResolveVidlove(embedUrl, refer, session)
 
     if Instr(1, host, "airflix1.com") > 0 or Instr(1, host, "brightpathsignals.com") > 0 then return RP_ResolveAirflix(embedUrl, refer, session)
 
@@ -294,6 +295,7 @@ function R_BuildFallbackCandidates(kind as String, tmdb as String, imdb as Strin
 
     if tmdb <> "" then
         if isMovie then
+            out.Push("https://player.vidlove.cc/embed/movie/" + tmdb)
             out.Push("https://airflix1.com/embed/movie/" + tmdb)
             out.Push("https://play.xpass.top/e/movie/" + tmdb)
             out.Push("https://vidsrc.cc/v2/embed/movie/" + tmdb)
@@ -303,6 +305,7 @@ function R_BuildFallbackCandidates(kind as String, tmdb as String, imdb as Strin
             out.Push("https://www.2embed.cc/embed/" + tmdb)
             out.Push("https://moviesapi.club/movie/" + tmdb)
         else
+            out.Push("https://player.vidlove.cc/embed/tv/" + tmdb + "/" + season.ToStr() + "/" + episode.ToStr())
             out.Push("https://airflix1.com/embed/tv/" + tmdb + "/" + season.ToStr() + "/" + episode.ToStr())
             out.Push("https://play.xpass.top/e/tv/" + tmdb + "/" + season.ToStr() + "/" + episode.ToStr())
             out.Push("https://vidsrc.cc/v2/embed/tv/" + tmdb + "/" + season.ToStr() + "/" + episode.ToStr())

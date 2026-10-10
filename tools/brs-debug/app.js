@@ -221,6 +221,24 @@
       });
       try { if (brs.setDisplayMode) brs.setDisplayMode("1080p"); } catch (e) {}
 
+      // Make the physical ENTER key behave exactly like the remote OK/Select
+      // button. brs-engine's built-in key table binds "Enter" to BOTH "select"
+      // and "play"; the "play" binding wins, so pressing Enter was firing
+      // play/pause instead of OK. Force Enter (and NumpadEnter) -> select.
+      // setCustomKeys MERGES into the engine's key map, so every other binding
+      // (arrows, Backspace=back, etc.) is left untouched.
+      try {
+        if (brs.setCustomKeys) {
+          brs.setCustomKeys(new Map([
+            ["Enter", "select"],
+            ["NumpadEnter", "select"],
+          ]));
+          window.__brsConsole.push("[harness] Enter remapped to OK/select");
+        }
+      } catch (e) {
+        window.__brsConsole.push("[harness] setCustomKeys failed: " + e);
+      }
+
       // initialize() kicks off an ASYNC fetch of assets/common.zip but does not
       // await it. Executing before the common: volume (fonts, etc.) is loaded
       // crashes the channel ("Error setting up file system / -22 ... default-fonts.json").

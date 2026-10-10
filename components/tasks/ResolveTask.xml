@@ -22,4 +22,5 @@
     <script type="text/brightscript" uri="pkg:/source/HlsMeta.brs" />
     <script type="text/brightscript" uri="pkg:/source/Resolver.brs" />
     <script type="text/brightscript" uri="pkg:/source/ResolverProviders.brs" />
+    <script type="text/brightscript" uri="pkg:/source/ResolverVidlove.brs" />
 </component>

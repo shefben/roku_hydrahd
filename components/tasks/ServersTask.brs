@@ -5,10 +5,11 @@ end sub
 sub doWork()
     mirrors = []
     if m.top.kind = "tv" then
-        if m.top.imdb <> "" and m.top.tmdb <> "" then
+        if U_FirstMatch(m.top.tmdb, "^(\d+)$") <> "" then
             mirrors = HA_FetchEpisodeMirrors(m.top.imdb, m.top.tmdb, m.top.season, m.top.episode, m.top.refer)
         else if m.top.slug <> "" then
-            mirrors = HA_FetchEpisodeMirrorsBySlug(m.top.slug, m.top.season, m.top.episode)
+            m.top.result = HA_FetchEpisodeMirrorInfoBySlug(m.top.slug, m.top.season, m.top.episode)
+            return
         end if
     else
         mirrors = HA_FetchMovieMirrors(m.top.imdb, m.top.tmdb, m.top.refer)

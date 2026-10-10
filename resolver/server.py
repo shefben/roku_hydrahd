@@ -969,6 +969,64 @@ def unpack_packed(packed: str) -> str:
 
 # --- Provider resolvers ---------------------------------------------
 
+def resolve_vidlove(embed_url: str, refer: str) -> dict[str, Any] | None:
+    """Use the JSON requests exposed by player.vidlove.cc's embed page."""
+    match = re.search(r"/embed/(movie|tv)/(\d+)(?:/(\d+)/(\d+))?", embed_url)
+    if not match:
+        return None
+    kind, tmdb, season, episode = match.groups()
+    params = {"id": tmdb, "mode": "json"}
+    if kind == "tv":
+        if not season or not episode:
+            return None
+        params.update(season=season, episode=episode)
+    provider_refer = "https://player.vidlove.cc/"
+    for source_name in ("moviebox2", "moviebox"):
+        params["sources"] = source_name
+        try:
+            body, _, _ = fetch("https://api.vidlove.cc/" + kind + "?" + urlparse.urlencode(params),
+                               {"Referer": provider_refer, "Origin": provider_refer.rstrip("/"),
+                                "Accept": "application/json"})
+        except OSError:
+            continue
+        try:
+            payload = json.loads(body)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(payload, dict) or not isinstance(payload.get("source"), dict):
+            continue
+        source = payload["source"]
+        stream_url = source.get("url")
+        if not isinstance(stream_url, str) or not stream_url:
+            continue
+        stream_format = "mp4" if ".mp4" in stream_url else "hls"
+        if source.get("type") in ("mp4", "hls"):
+            stream_format = source["type"]
+        qualities = []
+        for quality in source.get("qualities") or []:
+            if not isinstance(quality, dict) or not quality.get("url"):
+                continue
+            label = str(quality.get("quality") or "Auto")
+            height = re.search(r"\d{3,4}", label)
+            qualities.append({"label": label, "height": int(height[0]) if height else 0,
+                              "bandwidth": 0, "url": quality["url"]})
+            if len(qualities) == 1:
+                stream_url = quality["url"]
+                if quality.get("type") in ("mp4", "hls"):
+                    stream_format = quality["type"]
+        subtitles = []
+        for track in payload.get("subtitles") or []:
+            if isinstance(track, dict) and (track.get("url") or track.get("file")):
+                language = track.get("language") or "en"
+                subtitles.append({"url": track.get("url") or track["file"],
+                                  "language": language,
+                                  "name": track.get("label") or language.upper()})
+        return {"url": stream_url, "streamFormat": stream_format, "qualities": qualities,
+                "subtitles": subtitles, "chapters": [], "referer": provider_refer,
+                "userAgent": ""}
+    return None
+
+
 def resolve_generic(embed_url: str, refer: str) -> dict[str, Any] | None:
     """Pull the first .m3u8 / .mp4 we can find in the iframe HTML."""
     html, _, _ = fetch(embed_url, {"Referer": refer or embed_url})
@@ -1089,7 +1147,7 @@ def resolve_lookmovie(embed_url: str, refer: str) -> dict[str, Any] | None:
 
 def resolve_2embed(embed_url: str, refer: str) -> dict[str, Any] | None:
     """2embed.cc /embed/<tmdb> — finds a streamsrcs.2embed.cc swish iframe and follows it."""
-    html, _, final = fetch(embed_url, {"Referer": refer or "https://hydrahd.ru/"})
+    html, _, final = fetch(embed_url, {"Referer": refer or "https://hydrahd.ws/"})
     if not html:
         return None
     # data-src="https://streamsrcs.2embed.cc/swish?id=...&ref=..."
@@ -1130,7 +1188,7 @@ def resolve_xpass(embed_url: str, refer: str) -> dict[str, Any] | None:
 
     We try the primary playlist first, then walk the backups list.
     """
-    html, _, final = fetch(embed_url, {"Referer": refer or "https://hydrahd.ru/"})
+    html, _, final = fetch(embed_url, {"Referer": refer or "https://hydrahd.ws/"})
     if not html:
         return None
 
@@ -1609,7 +1667,7 @@ def resolve_moviesapi(embed_url: str, refer: str) -> dict[str, Any] | None:
     """
     html, _, final = fetch(
         embed_url,
-        {"Referer": refer or "https://hydrahd.ru/"},
+        {"Referer": refer or "https://hydrahd.ws/"},
     )
     if not html:
         return None
@@ -1741,7 +1799,7 @@ def resolve_autoembed(embed_url: str, refer: str) -> dict[str, Any] | None:
     or one of its mirrors. Walk the iframe chain through our existing
     provider table.
     """
-    html, _, final = fetch(embed_url, {"Referer": refer or "https://hydrahd.ru/"})
+    html, _, final = fetch(embed_url, {"Referer": refer or "https://hydrahd.ws/"})
     if not html:
         return None
     res = follow_known_iframes(html, final, refer or final)
@@ -1865,6 +1923,7 @@ def stub_provider(name: str) -> Callable[[str, str], dict[str, Any] | None]:
 
 # Map host substrings → resolver. First match wins. Order matters.
 PROVIDERS: list[tuple[str, Callable[[str, str], dict[str, Any] | None]]] = [
+    ("player.vidlove.cc", resolve_vidlove),
     ("cloudnestra.com",     resolve_cloudnestra),
     ("vidsrc.xyz",          resolve_vidsrc_xyz),
     ("vidsrc.in",           resolve_vidsrc_xyz),
@@ -1996,6 +2055,11 @@ def fallback_via_known_providers(ids: dict[str, str],
     is_tv = (kind == "tv")
 
     candidates: list[tuple[str, str, Callable[[str, str], dict[str, Any] | None]]] = []
+
+    # Current HydraHD mirror; try it before older provider chains.
+    if tmdb:
+        path = f"tv/{tmdb}/{season}/{episode}" if is_tv else f"movie/{tmdb}"
+        candidates.append(("vidlove", "https://player.vidlove.cc/embed/" + path, resolve_vidlove))
 
     # airflix1 — declared the default high-quality mirror by hydrahd; the
     # vaplayer.ru API returns a fresh master.m3u8 for almost any title
