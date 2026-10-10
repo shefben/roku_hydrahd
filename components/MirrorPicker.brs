@@ -4,12 +4,22 @@ sub init()
     m.mirrors = []
     m.args = invalid
 
+    ' A saved mirror to auto-resume once the FULL server list arrives (see
+    ' resolveDirectMirror / onMirrorResult). Kept separate from m.args so the
+    ' complete list is always fetched and shown - not just the one mirror the
+    ' episode was last played on.
+    m.pendingDirect = invalid
+
     ' Hosts we've already attempted in this picker session. Used to
     ' drive the auto-cascade ("try every mirror until one works")
     ' opt-in flow and to avoid looping back to a known-bad mirror.
     m.triedHosts = {}
     m.autoCascade = false
     m.dialog = invalid
+    ' Guards against launching two ResolveTasks for one selection - see
+    ' startResolveForMirror.
+    m.resolveInFlight = false
+    m.resolveLink = ""
 
     m.title = m.top.findNode("title")
     m.subtitle = m.top.findNode("subtitle")
@@ -66,11 +76,23 @@ sub onArgs()
     fetchMirrors()
 end sub
 
-' Synthesize a single-row mirror grid, mark the entry active, and kick
-' off ResolveTask exactly the way onMirrorSelected would have. If the
-' resolve fails the user can BACK out to ResumePicker and pick
-' "Choose a different mirror" to refresh the full list.
+' A saved mirror was handed to us (Resume / replaying the same episode).
+' Instead of showing ONLY that mirror, fetch the full server list so every
+' mirror stays visible and selectable, then auto-resume the saved one from
+' that list (onMirrorResult). Slightly slower to first frame than jumping
+' straight to the saved link, but the user keeps all their alternatives on
+' screen and can switch at any time.
 sub resolveDirectMirror(dm as Object)
+    m.pendingDirect = dm
+    m.status.text = "Loading mirrors..."
+    fetchMirrors()
+end sub
+
+' Fallback for when the server list can't be fetched at all (empty result):
+' synthesize a single-row grid from the saved mirror and resolve it directly
+' so resume still works with no fresh list. The onResolved failure path
+' re-tries a full fetch if this saved link turns out to be dead.
+sub resolveSavedMirrorOnly(dm as Object)
     name = ""
     if dm.name <> invalid then name = dm.name
     host = ""
@@ -95,6 +117,34 @@ sub resolveDirectMirror(dm as Object)
     onMirrorSelected()
 end sub
 
+' Ensure the saved mirror exists in m.mirrors and return its index. Matches
+' by host so we resume on the same provider using its FRESH link; if the
+' host has rotated out of the current list we append the saved mirror (with
+' its saved link) so it's still both playable and visible.
+function ensureSavedMirrorPresent(dm as Object) as Integer
+    wantHost = ""
+    if dm.host <> invalid then wantHost = LCase(dm.host)
+    if wantHost <> "" then
+        for i = 0 to m.mirrors.Count() - 1
+            mh = ""
+            if m.mirrors[i].host <> invalid then mh = LCase(m.mirrors[i].host)
+            if mh = wantHost then return i
+        end for
+    end if
+    name = ""
+    if dm.name <> invalid then name = dm.name
+    if name = "" then name = dm.host
+    m.mirrors.Push({
+        id: ""
+        name: name
+        link: dm.link
+        host: dm.host
+        qualityHint: ""
+        isPremium: false
+    })
+    return m.mirrors.Count() - 1
+end function
+
 sub fetchMirrors()
     m.top.loading = true
     if m.task <> invalid then m.task.unobserveField("result")
@@ -115,11 +165,35 @@ end sub
 sub onMirrorResult()
     res = m.task.result
     m.top.loading = false
+    ' Episode discovery supplies numeric IDs even when TMDB enrichment is off.
+    ' Keep href as the series key for progress; use the episode as HTTP referer.
+    if res <> invalid then
+        if res.tmdb <> invalid and res.tmdb <> "" then m.args.tmdb = res.tmdb
+        if res.imdb <> invalid and res.imdb <> "" then m.args.imdb = res.imdb
+        if res.refer <> invalid and res.refer <> "" then m.args.resolveRefer = res.refer
+    end if
     if res = invalid or res.mirrors = invalid or res.mirrors.Count() = 0 then
+        ' Empty list. If we were auto-resuming a saved mirror, fall back to
+        ' playing just that one so resume still works; otherwise there is
+        ' genuinely nothing to offer.
+        if m.pendingDirect <> invalid then
+            dm = m.pendingDirect
+            m.pendingDirect = invalid
+            resolveSavedMirrorOnly(dm)
+            return
+        end if
         m.status.text = "No mirrors available."
         return
     end if
     m.mirrors = sortMirrorsByScore(res.mirrors)
+
+    ' Auto-resuming a saved mirror: make sure it's in the list (append it if
+    ' its host rotated out) BEFORE we build the grid so every mirror -
+    ' including the saved one - is visible and selectable.
+    directIdx = -1
+    if m.pendingDirect <> invalid then
+        directIdx = ensureSavedMirrorPresent(m.pendingDirect)
+    end if
     root = createObject("roSGNode", "ContentNode")
     for each mr in m.mirrors
         cell = root.createChild("ContentNode")
@@ -139,6 +213,20 @@ sub onMirrorResult()
     m.grid.content = root
     m.grid.setFocus(true)
     m.status.text = m.mirrors.Count().ToStr() + " mirrors loaded - top-ranked first."
+
+    ' Saved-mirror auto-resume: kick off the mirror the episode was last
+    ' played on while leaving the WHOLE list on screen so the user can switch
+    ' at any time. Focus lands on that mirror so the highlight matches what's
+    ' about to play.
+    if m.pendingDirect <> invalid and directIdx >= 0 then
+        m.pendingDirect = invalid
+        m.grid.jumpToItem = directIdx
+        m.status.text = "Resuming on " + m.mirrors[directIdx].host + "..."
+        startResolveForMirror(m.mirrors[directIdx])
+        return
+    end if
+    m.pendingDirect = invalid
+
     ' Caller (DetailsView Resume button, ResumePicker, etc.) can hint at
     ' a previously-used mirror host. If we find a match in the freshly
     ' fetched list we kick off resolve straight away - same UX as
@@ -218,17 +306,34 @@ end sub
 ' observer when set programmatically to a new value).
 sub startResolveForMirror(mirror as Object)
     if mirror = invalid then return
+    ' Coalesce duplicate triggers. Setting m.grid.itemSelected fires the
+    ' itemSelected observer (onMirrorSelected) AND several callers then
+    ' also call onMirrorSelected() explicitly, so this runs twice for one
+    ' selection. Two ResolveTasks would each hammer the mirror CDN with a
+    ' full enrichment probe-burst back-to-back, draining its per-IP rate
+    ' budget so Roku's first segment fetches get 429'd and the stream
+    ' dies with a fatal error a second in. Skip if a resolve for this
+    ' exact link is already in flight.
+    if m.resolveInFlight = true and m.resolveLink = mirror.link then return
     m.activeMirror = mirror
     if mirror.host <> invalid and mirror.host <> "" then
         m.triedHosts[mirror.host] = true
     end if
     m.status.text = "Resolving stream from " + mirror.host + "..."
     m.top.loading = true
-    if m.resolve <> invalid then m.resolve.unobserveField("result")
+    ' Unobserve AND stop the previous task - unobserve alone leaves it
+    ' running (control=RUN was already sent), so it keeps hitting the CDN.
+    if m.resolve <> invalid then
+        m.resolve.unobserveField("result")
+        m.resolve.control = "STOP"
+    end if
+    m.resolveInFlight = true
+    m.resolveLink = mirror.link
     m.resolve = createObject("roSGNode", "ResolveTask")
     m.resolve.observeField("result", "onResolved")
     m.resolve.embedUrl = mirror.link
     m.resolve.refer = m.args.href
+    if m.args.resolveRefer <> invalid then m.resolve.refer = m.args.resolveRefer
     m.resolve.kind = m.args.kind
     m.resolve.imdb = m.args.imdb
     m.resolve.tmdb = m.args.tmdb
@@ -242,6 +347,9 @@ end sub
 sub onResolved()
     res = m.resolve.result
     m.top.loading = false
+    ' Resolve finished - clear the in-flight guard so the user can retry
+    ' this same mirror later (see startResolveForMirror).
+    m.resolveInFlight = false
     if res = invalid or res.url = invalid or res.url = "" then
         ' Mark this host as a failed resolve so the next visit ranks it
         ' below mirrors that are still working.

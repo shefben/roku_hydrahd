@@ -1,10 +1,8 @@
-' HydraApi.brs - Scrapes hydrahd.ru pages and exposes typed result objects.
+' HydraApi.brs - Scrapes HydraHD catalog pages and exposes typed result objects.
 ' All functions are synchronous and meant to be called from Tasks (background threads).
 
 function HA_Base() as String
-    base = U_PrefDefault("baseUrl", "https://hydrahd.ru")
-    if Right(base, 1) = "/" then base = Left(base, Len(base) - 1)
-    return base
+    return U_NormalizeBaseUrl(U_PrefDefault("baseUrl", U_DefaultBaseUrl()))
 end function
 
 function HA_UA() as String
@@ -14,6 +12,8 @@ end function
 ' --- HTTP -------------------------------------------------------------
 
 function HA_Get(url as String, refer as String) as String
+    url = U_CatalogUrl(url)
+    refer = U_CatalogUrl(refer)
     xfer = CreateObject("roUrlTransfer")
     xfer.SetCertificatesFile("common:/certs/ca-bundle.crt")
     xfer.AddHeader("X-Roku-Reserved-Dev-Id", "")
@@ -175,10 +175,21 @@ function HA_ParseHomeRows(html as String) as Object
             end if
             chunk = Mid(html, startBody, endBody - startBody)
             cards = HA_ParseCards(chunk)
-            if cards.Count() > 0 then
-                rows.Push({ title: h.label, items: cards })
-            end if
-            cursor = endBody
+            ' The site has separate Movies / Series tabs inside each section.
+            ' Keep both on Roku, applying the display cap to each independently.
+            for each kind in ["movie", "tv"]
+                items = []
+                for each card in cards
+                    if card.kind = kind then items.Push(card)
+                end for
+                if items.Count() > 0 then
+                    suffix = " Movies"
+                    if kind = "tv" then suffix = " TV Shows"
+                    rows.Push({ title: h.label + suffix, items: items })
+                end if
+            end for
+            ' endBody is the next header's first character. Include it next time.
+            cursor = endBody - 1
         end if
     end for
 
@@ -194,45 +205,27 @@ function HA_FetchHome() as Object
 end function
 
 function HA_FetchMovies(page as Integer) as Object
-    if page < 1 then page = 1
-    url = HA_Base() + "/movies/" + page.ToStr() + "/"
-    html = HA_Get(url, HA_Base() + "/")
-    return HA_ParseCards(html)
+    return HA_FetchListByPath("movies", page)
 end function
 
 function HA_FetchPopular(page as Integer) as Object
-    if page < 1 then page = 1
-    url = HA_Base() + "/movies/popular/" + page.ToStr() + "/"
-    html = HA_Get(url, HA_Base() + "/")
-    return HA_ParseCards(html)
+    return HA_FetchListByPath("movies/popular", page)
 end function
 
 function HA_FetchTopRated(page as Integer) as Object
-    if page < 1 then page = 1
-    url = HA_Base() + "/movies/star-rating/" + page.ToStr() + "/"
-    html = HA_Get(url, HA_Base() + "/")
-    return HA_ParseCards(html)
+    return HA_FetchListByPath("movies/star-rating", page)
 end function
 
 function HA_FetchTvShows(page as Integer) as Object
-    if page < 1 then page = 1
-    url = HA_Base() + "/tv-shows/" + page.ToStr() + "/"
-    html = HA_Get(url, HA_Base() + "/")
-    return HA_ParseCards(html)
+    return HA_FetchListByPath("tv-shows", page)
 end function
 
 function HA_FetchTvShowsPopular(page as Integer) as Object
-    if page < 1 then page = 1
-    url = HA_Base() + "/tv-shows/popular/" + page.ToStr() + "/"
-    html = HA_Get(url, HA_Base() + "/")
-    return HA_ParseCards(html)
+    return HA_FetchListByPath("tv-shows/popular", page)
 end function
 
 function HA_FetchTvShowsTopRated(page as Integer) as Object
-    if page < 1 then page = 1
-    url = HA_Base() + "/tv-shows/star-rating/" + page.ToStr() + "/"
-    html = HA_Get(url, HA_Base() + "/")
-    return HA_ParseCards(html)
+    return HA_FetchListByPath("tv-shows/star-rating", page)
 end function
 
 ' Generic list fetcher used by the Movies / TV-Shows tab dropdowns.
@@ -257,6 +250,8 @@ function HA_FetchListByPath(path as String, page as Integer) as Object
 end function
 
 function HA_Search(query as String) as Object
+    query = U_Trim(query)
+    if query = "" then return []
     url = HA_Base() + "/index.php?menu=search&query=" + U_UrlEncode(query)
     html = HA_Get(url, HA_Base() + "/")
     return HA_ParseCards(html)
@@ -332,7 +327,7 @@ function HA_ParseDetails(html as String, kind as String, id as String, baseHref 
     end if
 
     ' Genres
-    genreRe = CreateObject("roRegex", "/genres/watch-([a-z-]+)-movies-online-free", "ig")
+    genreRe = CreateObject("roRegex", "/genres/watch-([a-z-]+)-movies-online-free", "i")
     gm = genreRe.matchAll(html)
     seen = {}
     if gm <> invalid then
@@ -347,7 +342,7 @@ function HA_ParseDetails(html as String, kind as String, id as String, baseHref 
     end if
 
     ' Cast (uses /person/<id> pattern)
-    castRe = CreateObject("roRegex", "<a[^>]+href=" + chr(34) + "/person/(\d+)" + chr(34) + "[^>]*title=" + chr(34) + "watch ([^" + chr(34) + "]+) movies", "ig")
+    castRe = CreateObject("roRegex", "<a[^>]+href=" + chr(34) + "/person/(\d+)" + chr(34) + "[^>]*title=" + chr(34) + "watch ([^" + chr(34) + "]+) movies", "i")
     cm = castRe.matchAll(html)
     if cm <> invalid then
         for each c in cm
@@ -361,7 +356,7 @@ end function
 
 function HA_ParseSeasons(html as String) as Object
     seasons = []
-    epRe = CreateObject("roRegex", "data-slug=" + chr(34) + "([^" + chr(34) + "]+)" + chr(34) + "[\s\S]*?data-season=" + chr(34) + "(\d+)" + chr(34) + "[\s\S]*?data-episode=" + chr(34) + "(\d+)" + chr(34) + "[\s\S]*?<span class=" + chr(34) + "tv_episode_name" + chr(34) + "[^>]*>([\s\S]*?)</span>", "ig")
+    epRe = CreateObject("roRegex", "data-slug=" + chr(34) + "([^" + chr(34) + "]+)" + chr(34) + "[\s\S]*?data-season=" + chr(34) + "(\d+)" + chr(34) + "[\s\S]*?data-episode=" + chr(34) + "(\d+)" + chr(34) + "[\s\S]*?<span class=" + chr(34) + "tv_episode_name" + chr(34) + "[^>]*>([\s\S]*?)</span>", "i")
     matches = epRe.matchAll(html)
     if matches = invalid then return seasons
 
@@ -442,11 +437,17 @@ function HA_FetchEpisodeMirrors(imdb as String, tmdb as String, season as Intege
 end function
 
 function HA_FetchEpisodeMirrorsBySlug(slug as String, season as Integer, episode as Integer) as Object
+    result = HA_FetchEpisodeMirrorInfoBySlug(slug, season, episode)
+    return result.mirrors
+end function
+
+function HA_FetchEpisodeMirrorInfoBySlug(slug as String, season as Integer, episode as Integer) as Object
     refer = HA_Base() + "/watchseries/" + slug + "-online-free/season/" + season.ToStr() + "/episode/" + episode.ToStr()
     html = HA_Get(refer, HA_Base() + "/")
     info = HA_ParseEpisodeIds(html)
-    if info.imdb = "" or info.tmdb = "" then return []
-    return HA_FetchEpisodeMirrors(info.imdb, info.tmdb, season, episode, refer)
+    mirrors = []
+    if info.tmdb <> "" then mirrors = HA_FetchEpisodeMirrors(info.imdb, info.tmdb, season, episode, refer)
+    return { mirrors: mirrors, tmdb: info.tmdb, imdb: info.imdb, refer: refer }
 end function
 
 function HA_ParseEpisodeIds(html as String) as Object
@@ -461,9 +462,9 @@ function HA_ParseMirrors(html as String) as Object
     out = []
     if html = invalid or html = "" then return out
     btnRe = CreateObject("roRegex", "<div[^>]+class=" + chr(34) + "iframe-server-button([^" + chr(34) + "]*)" + chr(34) + "[^>]+data-id=" + chr(34) + "(\d+)" + chr(34) + "[^>]+data-link=" + chr(34) + "([^" + chr(34) + "]+)" + chr(34) + "[^>]*>(.*?)</div>", "is")
-    m = btnRe.matchAll(html)
-    if m = invalid then return out
-    for each btn in m
+    buttons = btnRe.matchAll(html)
+    if buttons = invalid then return out
+    for each btn in buttons
         flags = btn[1]
         id = btn[2]
         link = U_HtmlDecode(btn[3])
@@ -494,17 +495,16 @@ function HA_ParseMirrors(html as String) as Object
             quality = U_FirstMatch(link, "(2160p|1080p|720p|480p|4K|FHD|UHD|HD)")
         end if
         host = HA_HostOf(link)
-        if HA_IsMirrorBlocked(host) then
-            continue for
+        if not HA_IsMirrorBlocked(host) then
+            out.Push({
+                id: id
+                name: name
+                link: link
+                qualityHint: U_Trim(U_HtmlDecode(quality))
+                isPremium: Instr(1, flags, "premium") > 0
+                host: host
+            })
         end if
-        out.Push({
-            id: id
-            name: name
-            link: link
-            qualityHint: U_Trim(U_HtmlDecode(quality))
-            isPremium: Instr(1, flags, "premium") > 0
-            host: host
-        })
     end for
     return out
 end function

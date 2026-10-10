@@ -629,7 +629,7 @@ end function
 
 function RP_ResolveXpass(embedUrl as String, refer as String, session as Object) as Object
     headers = {}
-    if refer <> "" then headers["Referer"] = refer else headers["Referer"] = "https://hydrahd.ru/"
+    if refer <> "" then headers["Referer"] = U_CatalogUrl(refer) else headers["Referer"] = HA_Base() + "/"
     page = HC_Get(session, embedUrl, headers, 8000)
     if page = invalid or page.body = "" then return invalid
     html = page.body
@@ -1037,7 +1037,7 @@ end function
 
 function RP_Resolve2embed(embedUrl as String, refer as String, session as Object) as Object
     headers = {}
-    if refer <> "" then headers["Referer"] = refer else headers["Referer"] = "https://hydrahd.ru/"
+    if refer <> "" then headers["Referer"] = U_CatalogUrl(refer) else headers["Referer"] = HA_Base() + "/"
     page = HC_Get(session, embedUrl, headers, 8000)
     if page = invalid or page.body = "" then return invalid
     final = page.finalUrl
@@ -1211,7 +1211,7 @@ end function
 
 function RP_ResolveMoviesapi(embedUrl as String, refer as String, session as Object) as Object
     refUrl = refer
-    if refUrl = "" then refUrl = "https://hydrahd.ru/"
+    if refUrl = "" then refUrl = HA_Base() + "/"
     page = HC_Get(session, embedUrl, { "Referer": refUrl }, 8000)
     if page = invalid or page.body = "" then return invalid
     final = page.finalUrl

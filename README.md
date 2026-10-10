@@ -5,7 +5,7 @@
 # HydraHD - Roku Channel
 
 A Roku channel that browses and plays movies + TV shows from
-[hydrahd.ru](https://hydrahd.ru). All catalog data (home rows, search,
+[hydrahd.ws](https://hydrahd.ws). All catalog data (home rows, search,
 details, seasons / episodes, mirrors) is scraped directly from
 HydraHD's public HTML at runtime; no API key needed.
 
@@ -21,10 +21,8 @@ state sync.
 ## Features
 
 ### Browsing & discovery
-- **Home page** with Trending, Latest, Top Rated, Popular TV rows
-  scraped from the HydraHD index page (titles, posters, year, rating),
-  plus dedicated **Latest TV Shows** and **Top Rated TV Shows** rows
-  pulled from `/tv-shows` and `/tv-shows/star-rating`.
+- **Home page** with separate movie and TV rows for Trending, Latest,
+  and Top Rated, scraped from both tabs of the current HydraHD homepage.
 - **Continue Watching** row pinned to the top of Home for any title
   you've started but not finished. For TV, the show stays here until
   you finish the **last episode of the last season** - finishing one
@@ -265,6 +263,11 @@ square. There is no other build step.
 
 ## Sideloading
 
+Existing installations automatically switch the retired `.ru` setting to
+`.ws`. Saved catalog links use the current domain, while favorites and
+resume positions retain their existing registry keys. Custom base URLs
+remain configurable in Settings.
+
 1. Enable Developer Mode on the Roku (`Home Home Home Up Up Right Left
    Right Left Right`) and note its IP address and the password you set.
 
@@ -293,6 +296,20 @@ square. There is no other build step.
    Application Installer.
 
 4. Launch from the Home screen.
+
+To check catalog, search, episode, mirror, and saved-progress regressions:
+
+```powershell
+python tools/test_hydra.py          # BrightScript; requires Node/npm
+python tools/test_hydra_resolver.py # Python resolver tests
+```
+
+The fixtures were captured from `.ws` and the Vidlove API on 2026-10-09;
+provider URLs in JSON fixtures are replaced with test URLs. Vidlove is
+supported in both resolvers, including its extensionless MP4 URLs and
+quality choices. Live upstream availability varies: Airflix, Xpass, and
+2embed failed playback probes during this update. Full playback still
+requires testing on a Roku.
 
 ---
 

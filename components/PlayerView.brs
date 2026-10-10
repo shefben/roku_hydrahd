@@ -62,6 +62,51 @@ sub init()
     ' Position of the last premature "finished" stall; lets the retry
     ' budget refill once playback makes real progress past a bad patch.
     m.lastStallPos = -999
+    ' CDN rate-limit (HTTP 429) recovery. These vaplayer/airflix CDNs cap
+    ' requests at ~45 per 10s per IP (Retry-After: 10). Roku's cold-start
+    ' prefetch burst alone exceeds that cap, so playback dies a few seconds
+    ' in with a buffer error (errorStr contains "429"). Rebuilding/
+    ' restarting re-triggers the same cold-start burst and 429s again
+    ' (verified: a rebuild after a full fresh 10s window still died at
+    ' pos 0) - so we must NEVER tear the node down. What DOES work (proven
+    ' by the user's manual fast-forward) is to keep the node alive, wait
+    ' out the 10s window, then SEEK forward: a seek makes Roku do a small
+    ' seek-refill instead of the big cold-start burst, staying under the
+    ' cap. rateJumps are the escalating forward-seek distances tried on
+    ' successive stalls; rateJumpIdx indexes them (refills after real
+    ' progress). rateLimited is set when the error looks like a 429.
+    ' everPlayed gates recovery so a mirror that never started still fails
+    ' fast. recovering guards re-entrancy against the error/finished storm.
+    m.everPlayed = false
+    m.recovering = false
+    m.rateLimited = false
+    ' errorStr from the most recent 'error' event. A 429 storm also fires a
+    ' 'finished' (which carries no errorStr of its own), so we stash the last
+    ' error here to let the 'finished' branch recognise the stall as a 429 and
+    ' route it to rate-limit recovery instead of auto-advancing.
+    m.lastErrorStr = ""
+    m.overlayAutoShown = false
+    m.rateJumps = [30, 90, 150, 210]
+    m.rateJumpIdx = 0
+    m.rateRecoverPos = 0
+    ' Persistent-recovery bookkeeping. The 429 cap is time-based (Roku's
+    ' cold-start prefetch burst per fill trips it a few seconds in), so a
+    ' single wait+seek rarely settles it - we loop indefinitely and NEVER
+    ' auto-advance on a 429. rateAttempts counts wait+seek cycles this run;
+    ' rateNoProgress counts consecutive cycles where the playhead did not
+    ' move (seek failing to revive the node); lastRateProgressPos is the last
+    ' position we actually advanced past; rateRebuilt gates the one
+    ' last-resort rebuild per stuck streak.
+    m.rateAttempts = 0
+    m.rateNoProgress = 0
+    m.lastRateProgressPos = -999
+    m.rateRebuilt = false
+    ' Kept for the last-resort rebuild if a forward seek can't revive the
+    ' node at all.
+    m.currentPlayUrl = ""
+    m.currentPlayFmt = ""
+    m.rateLimitTimer = m.top.findNode("rateLimitTimer")
+    m.rateLimitTimer.observeField("fire", "onRateLimitTimerFire")
 
     ' Skip Intro / Play Next Episode banner state. Two distinct
     ' visual modes share the skipBanner node:
@@ -208,6 +253,10 @@ sub onArgs()
     end if
     m.lastSavedPos = -999
     m.progressSaved = false
+    ' New episode/stream: reset the per-episode rate-limit recovery state.
+    m.everPlayed = false
+    m.rateLimited = false
+    m.rateJumpIdx = 0
 
     if a.chapters <> invalid then
         m.chapters = a.chapters
@@ -323,11 +372,25 @@ sub startPlayback(url as String, fmt as String)
 
     m.finishedRetries = 0
     m.lastStallPos = -999
+    m.recovering = false
+    ' Clear the transient rate-limit stall state for the new fill. The
+    ' campaign guards (rateAttempts / rateNoProgress / rateRebuilt) are NOT
+    ' reset here - they clear on the next real 'playing' - so a last-resort
+    ' rebuild (which routes back through startPlayback) can't wipe the very
+    ' guard that stops it looping.
+    m.rateLimited = false
+    m.lastErrorStr = ""
+    m.rateJumpIdx = 0
+    m.lastRateProgressPos = -999
+    if m.rateLimitTimer <> invalid then m.rateLimitTimer.control = "stop"
 
     cn = createObject("roSGNode", "ContentNode")
     cn.url = url
     if fmt = invalid or fmt = "" then fmt = U_StreamFormat(url)
     cn.streamFormat = fmt
+    ' Remember what we handed the Video node for a last-resort rebuild.
+    m.currentPlayUrl = url
+    m.currentPlayFmt = fmt
     cn.title = m.title.text
     cn.live = false
     cn.playStart = m.startPosition
@@ -406,6 +469,23 @@ sub onVideoState()
     end if
     if s = "playing" then
         m.status.text = ""
+        m.everPlayed = true
+        m.recovering = false
+        m.rateLimited = false
+        ' Reaching 'playing' means the last recovery seek revived the node and
+        ' the playhead is moving again - clear the campaign counters so the
+        ' next distinct stall starts with a fresh budget.
+        m.lastErrorStr = ""
+        m.rateAttempts = 0
+        m.rateNoProgress = 0
+        m.rateRebuilt = false
+        m.lastRateProgressPos = W_AsInt(m.video.position)
+        ' A successful forward-seek recovery closes the "working around a
+        ' stream limit" overlay we put up, but never one the user opened.
+        if m.overlayAutoShown then
+            m.overlayAutoShown = false
+            hideOverlay()
+        end if
         ' Don't yank focus off a floating banner that's holding it so OK
         ' can reach onKeyEvent (see updateNextEpBanner / updateSkipBanner);
         ' e.g. unpausing via a banner's play toggle re-enters "playing"
@@ -419,6 +499,23 @@ sub onVideoState()
     else if s = "buffering" then
         m.status.text = "Buffering..."
     else if s = "error" then
+        es = m.video.errorStr
+        print "[Player] errorStr="; es; " errorCode="; m.video.errorCode
+        ' Once the stream has played at least once this episode, an error is
+        ' a mid-stream drop, not a dead mirror. The vaplayer/airflix CDNs'
+        ' 429 rate limit surfaces here as a buffer error whose errorStr
+        ' contains "429". Flag it, PAUSE the node to keep it alive (so the
+        ' post-cooldown forward seek can revive it - a stop/rebuild would
+        ' just re-trigger the cold-start burst), and hand off to the shared
+        ' recovery scheduler. An error BEFORE ever playing is a real
+        ' mirror/resolve failure - fail fast.
+        if m.everPlayed then
+            m.lastErrorStr = es
+            if Instr(1, es, "429") > 0 or Instr(1, es, "buffer") > 0 then m.rateLimited = true
+            if m.rateLimited and not m.recovering then m.video.control = "pause"
+            scheduleStreamRecovery(W_AsInt(m.video.position))
+            return
+        end if
         saveProgress(false)
         ' If we never made it to the "playing" state and now errored,
         ' blame the mirror so its reliability score drops.
@@ -429,49 +526,31 @@ sub onVideoState()
             end if
         end if
         showOverlay()
-        m.status.text = "Playback error: " + m.video.errorStr
-        print "[Player] errorStr="; m.video.errorStr; " errorCode="; m.video.errorCode
+        m.status.text = "Playback error: " + es
     else if s = "finished" then
         ' A "finished" far short of the reported duration is never a real
-        ' ending - it's a broken stream. Two flavors seen in the wild:
-        '  - movie mirrors whose manifest briefly reports a short/stale
-        '    duration on the first fetch, so the node flips to "finished"
-        '    seconds after playStart (pos near 0, dur plausible);
-        '  - mirrors serving a poisoned/zero-byte segment mid-playlist
-        '    (e.g. airflix/vaplayer's Snowpiercer S2 has a 0-byte first
-        '    segment) - the decoder hits it, signals end-of-stream, and
-        '    playback dies after the few buffered seconds, at ANY position.
-        ' The mirror is fine - just skip the bad patch. Seek forward and
-        ' keep the SAME mirror; never switch to a worse one over a few
-        ' junk segments. If a seek lands on another dead spot the position
-        ' won't have advanced, so bump the jump distance (10 -> 20 -> 30..)
-        ' to punch straight through a run of bad segments. Any real
-        ' progress since the last stall resets the counter, so each bad
-        ' patch gets its own budget.
+        ' ending - it's a broken stream. Route it to the shared recovery
+        ' scheduler, which the error branch also feeds. That handles both
+        ' the CDN 429 rate limit (wait out the window then fast-forward the
+        ' live node) and a 0-byte poison patch (immediate seek-forward),
+        ' with a re-entrancy guard so the error/finished storm collapses to
+        ' one recovery attempt.
         dur = W_AsInt(m.video.duration)
         posSec = W_AsInt(m.video.position)
+        ' The 429 storm reports "finished" as well as "error". If the last
+        ' error was a rate limit, this is NOT a real ending - keep the live
+        ' node and recover on it. NEVER auto-advance to the next episode on a
+        ' 429 (that abandons the episode the user is watching for one that
+        ' will 429 the same way).
+        if m.everPlayed and (m.rateLimited or Instr(1, m.lastErrorStr, "429") > 0) then
+            m.rateLimited = true
+            if not m.recovering then m.video.control = "pause"
+            scheduleStreamRecovery(posSec)
+            return
+        end if
         premature = (dur > 30 and posSec < 10) or (dur > 300 and posSec < dur - 120)
         if premature then
-            if posSec > m.lastStallPos + 15 then m.finishedRetries = 0
-            m.lastStallPos = posSec
-            if m.finishedRetries < 40 then
-                m.finishedRetries = m.finishedRetries + 1
-                jump = 10 * m.finishedRetries
-                if jump > 120 then jump = 120
-                target = posSec + jump
-                if target < dur - 10 then
-                    print "[Player] skip bad patch at pos="; posSec; " dur="; dur; " jump="; jump; " retry="; m.finishedRetries
-                    m.video.seek = target
-                    m.video.control = "play"
-                    return
-                end if
-            end if
-            ' Only here if seeking forward can't recover (right at the end,
-            ' or 40 straight dead seeks). Stay on the mirror - just stop.
-            print "[Player] premature finished unrecoverable at pos="; posSec; " dur="; dur
-            saveProgress(false)
-            showOverlay()
-            m.status.text = "Trouble with this part of the stream - fast-forward to continue."
+            scheduleStreamRecovery(posSec)
             return
         end if
         saveProgress(true)
@@ -481,6 +560,137 @@ sub onVideoState()
         showOverlay()
         m.status.text = "Playback ended."
     end if
+end sub
+
+' Shared premature-stop recovery, fed by both the "error" and "finished"
+' branches. The re-entrancy guard (m.recovering) collapses the CDN's
+' error/finished storm to a single attempt.
+'
+' Two distinct causes, two recoveries:
+'   - CDN 429 rate limit (m.rateLimited): Roku's cold-start prefetch burst
+'     tripped the ~45-req/10s cap. Rebuilding re-bursts and 429s again, so
+'     we keep the node ALIVE, wait out the 10s window (rateLimitTimer),
+'     then fast-forward it (onRateLimitTimerFire) - a seek does a small
+'     seek-refill that stays under the cap. This is exactly what a manual
+'     fast-forward does, just automated and timed to the window.
+'   - 0-byte poison patch (not rate-limited): the node is healthy, so seek
+'     forward immediately past the dead segment(s), escalating the jump.
+sub scheduleStreamRecovery(posSec as Integer)
+    if m.recovering then return
+    m.recovering = true
+    saveProgress(false)
+    ' Real progress since the last stall refills the jump budget so each
+    ' distinct bad patch gets its own allowance.
+    if posSec > m.lastStallPos + 20 then
+        m.rateJumpIdx = 0
+        m.finishedRetries = 0
+    end if
+    m.lastStallPos = posSec
+    m.rateRecoverPos = posSec
+
+    if m.rateLimited then
+        ' Persistent recovery: NEVER give up and NEVER auto-advance on a 429.
+        ' The cap is time-based (a cold-start burst per fill trips it), so the
+        ' only thing that helps is to pause (stop fetching), wait out the 10s
+        ' window, then do a small forward seek. Loop that indefinitely - the
+        ' playhead marches forward across cycles (onRateLimitTimerFire) so a
+        ' rate-limited stream keeps making progress instead of stopping.
+        m.rateAttempts = m.rateAttempts + 1
+
+        ' Distinguish "limping forward" (each cycle plays a few seconds then
+        ' re-stalls further along - fine, let it keep going) from "wedged"
+        ' (the seek never revives the node, so pos stays put). Only the wedged
+        ' case warrants the last-resort rebuild.
+        if posSec > m.lastRateProgressPos + 5 then
+            m.lastRateProgressPos = posSec
+            m.rateNoProgress = 0
+        else
+            m.rateNoProgress = m.rateNoProgress + 1
+        end if
+
+        if m.rateNoProgress >= 6 and not m.rateRebuilt and m.currentPlayUrl <> "" then
+            ' Seek hasn't moved the playhead for 6 cycles - the node looks
+            ' wedged. Rebuild from the stored URL at the last position. A
+            ' cold-start rebuild usually re-bursts and 429s again (documented
+            ' at init), so this is a genuine last resort; if it re-bursts, the
+            ' error/finished handlers just re-enter this loop.
+            m.rateRebuilt = true
+            m.rateNoProgress = 0
+            print "[Player] rate-limit: seek not reviving after "; m.rateAttempts; " cycles - last-resort rebuild at pos="; posSec
+            rebuildAtPosition(posSec)
+            return
+        end if
+
+        print "[Player] rate-limit stall at pos="; posSec; " - waiting out the 10s window before fast-forward (cycle "; m.rateAttempts; ", noprog="; m.rateNoProgress; ")"
+        m.overlayAutoShown = true
+        showOverlay()
+        m.status.text = "Working around a stream limit - one moment..."
+        m.rateLimitTimer.control = "start"
+        return
+    end if
+
+    ' Non-429 premature finish = a dead / 0-byte segment patch. The node is
+    ' still healthy, so skip forward past it, escalating the jump so a run
+    ' of bad segments gets punched through.
+    dur = W_AsInt(m.video.duration)
+    if m.finishedRetries < 40 then
+        m.finishedRetries = m.finishedRetries + 1
+        jump = 10 * m.finishedRetries
+        if jump > 120 then jump = 120
+        target = posSec + jump
+        if target < dur - 10 then
+            print "[Player] skip bad patch at pos="; posSec; " dur="; dur; " jump="; jump; " retry="; m.finishedRetries
+            m.recovering = false
+            m.video.seek = target
+            m.video.control = "play"
+            return
+        end if
+    end if
+    print "[Player] premature finished unrecoverable at pos="; posSec; " dur="; dur
+    m.recovering = false
+    saveProgress(false)
+    showOverlay()
+    m.status.text = "Trouble with this part of the stream - fast-forward to continue."
+end sub
+
+' Rate-limit window (Retry-After: 10) has elapsed - fast-forward the still
+' -alive node past where it stalled. A SEEK triggers Roku's small seek-
+' refill instead of the big cold-start prefetch burst, so it stays under
+' the CDN's ~45-req/10s cap. Escalate the jump on each successive stall
+' (the user found >1 min sometimes needed). Never rebuild here - a fresh
+' ContentNode would re-trigger the cold-start burst and 429 again.
+sub onRateLimitTimerFire()
+    idx = m.rateJumpIdx
+    if idx >= m.rateJumps.Count() then idx = m.rateJumps.Count() - 1
+    jump = m.rateJumps[idx]
+    m.rateJumpIdx = idx + 1
+    dur = W_AsInt(m.video.duration)
+    target = m.rateRecoverPos + jump
+    if dur > 0 and target > dur - 15 then target = dur - 15
+    if target < 0 then target = 0
+    print "[Player] rate-limit window elapsed - fast-forward to "; target; " (jump="; jump; ")"
+    m.rateLimited = false
+    m.recovering = false
+    m.status.text = "Resuming..."
+    m.video.seek = target
+    m.video.control = "play"
+end sub
+
+' Last resort when the forward-seek recovery hasn't moved the playhead for
+' several cycles: the node is wedged, so rebuild the ContentNode from the
+' stored URL, resuming at the last position instead of 0. A cold-start
+' rebuild re-triggers the prefetch burst and often 429s again (verified at
+' init - a rebuild after a fresh 10s window still died at pos 0), so this is
+' genuinely last-ditch; startPlayback clears the transient stall state and, if
+' it re-bursts, the error/finished handlers re-enter the persistent loop.
+sub rebuildAtPosition(posSec as Integer)
+    if m.currentPlayUrl = "" then return
+    if m.rateLimitTimer <> invalid then m.rateLimitTimer.control = "stop"
+    m.startPosition = posSec
+    m.overlayAutoShown = true
+    showOverlay()
+    m.status.text = "Reconnecting to the stream..."
+    startPlayback(m.currentPlayUrl, m.currentPlayFmt)
 end sub
 
 ' tryAutoAdvance now keeps the user inside PlayerView. When there's a

@@ -15,7 +15,7 @@ sub init()
     ' We track the rows in display order so onKeyEvent can move focus
     ' up/down between them.
     m.baseRow = m.top.findNode("baseRow")
-    m.baseRow.buttons = ["Use hydrahd.ru", "Edit URL"]
+    m.baseRow.buttons = ["Use hydrahd.ws", "Edit URL"]
     m.baseRow.observeField("buttonSelected", "onBaseRowSelected")
 
     m.tmdbValue = m.top.findNode("tmdbValue")
@@ -83,7 +83,7 @@ sub onSelfFocusChanged()
 end sub
 
 sub refresh()
-    m.baseUrlValue.text = U_PrefDefault("baseUrl", "https://hydrahd.ru")
+    m.baseUrlValue.text = U_NormalizeBaseUrl(U_PrefDefault("baseUrl", U_DefaultBaseUrl()))
     r = U_PrefDefault("resolverUrl", U_DefaultResolverUrl())
     if r = "" then r = "(not set - falls back to best-effort scrape)"
     m.resolverValue.text = r
@@ -118,10 +118,10 @@ end sub
 sub onBaseRowSelected()
     idx = m.baseRow.buttonSelected
     if idx = 0 then
-        U_PrefSet("baseUrl", "https://hydrahd.ru")
+        U_PrefSet("baseUrl", U_DefaultBaseUrl())
         refresh()
     else if idx = 1 then
-        openUrlEditor("baseUrl", "Edit base URL", U_PrefDefault("baseUrl", "https://hydrahd.ru"))
+        openUrlEditor("baseUrl", "Edit base URL", U_NormalizeBaseUrl(U_PrefDefault("baseUrl", U_DefaultBaseUrl())))
     end if
 end sub
 
@@ -196,7 +196,7 @@ sub onUrlActionsSelected()
     if idx = 0 then
         val = U_Trim(m.urlKb.text)
         if val = invalid then val = ""
-        if m.editTarget = "baseUrl" and val = "" then val = "https://hydrahd.ru"
+        if m.editTarget = "baseUrl" then val = U_NormalizeBaseUrl(val)
         U_PrefSet(m.editTarget, val)
         m.urlEditGroup.visible = false
         refresh()
