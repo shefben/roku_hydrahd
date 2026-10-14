@@ -6,6 +6,7 @@
         <field id="width" type="float" value="220" />
         <field id="height" type="float" value="370" />
     </interface>
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
     <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
     <script type="text/brightscript" uri="pkg:/source/Sync.brs" />
     <script type="text/brightscript">
