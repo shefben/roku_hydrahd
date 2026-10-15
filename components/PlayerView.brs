@@ -1758,6 +1758,9 @@ sub loadCustomSubtitle(url as String)
 end sub
 
 sub onSubCues()
+    ' A completed download must not undo an Off selection.
+    if m.activeSubtitle < 0 or m.activeSubtitle >= m.subtitles.Count() then return
+    if m.subTask = invalid then return
     cues = m.subTask.cues
     if cues = invalid then cues = []
     m.cues = cues
@@ -1781,7 +1784,12 @@ end sub
 ' native as the immediate fallback), or clear everything when off.
 sub applySubtitleSelection()
     if m.activeSubtitle < 0 or m.activeSubtitle >= m.subtitles.Count() then
-        ' Off: clear custom cues AND native captions.
+        ' Off: detach any pending download before clearing captions.
+        if m.subTask <> invalid then
+            m.subTask.unobserveField("cues")
+            m.subTask.control = "STOP"
+            m.subTask = invalid
+        end if
         m.cues = []
         m.curCueText = ""
         m.video.subtitleTrack = ""
@@ -1818,7 +1826,11 @@ sub onCapTick()
             exit for
         end if
     end for
-    if text = m.curCueText then return
+    if text = m.curCueText then
+        ' The menu may have hidden this cue since its text last changed.
+        m.capBox.visible = (text <> "")
+        return
+    end if
     m.curCueText = text
     if text = "" then
         m.capBox.visible = false

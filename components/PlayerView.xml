@@ -128,24 +128,27 @@
 
             <Label id="status" text="" font="font:SmallSystemFont" color="0xffd24aff" width="1680" maxLines="2" />
 
-            <Group id="qualityPanel" visible="false">
-                <Label text="Pick a quality - up arrow returns to toolbar" font="font:MediumBoldSystemFont" color="0xffffffff" />
-                <LabelList id="qualityRow" translation="[0, 36]" itemSize="[420, 48]" numRows="6" drawFocusFeedback="true" />
-            </Group>
+            <!-- Alternative panels occupy one slot in the vertical layout. -->
+            <Group id="optionsPanel">
+                <Group id="qualityPanel" visible="false">
+                    <Label text="Pick a quality - up arrow returns to toolbar" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                    <LabelList id="qualityRow" translation="[0, 36]" itemSize="[420, 48]" numRows="6" drawFocusFeedback="true" />
+                </Group>
 
-            <Group id="ccPanel" visible="false">
-                <Label text="Pick a subtitle track - up arrow returns to toolbar" font="font:MediumBoldSystemFont" color="0xffffffff" />
-                <LabelList id="ccRow" translation="[0, 36]" itemSize="[520, 48]" numRows="8" drawFocusFeedback="true" />
-            </Group>
+                <Group id="ccPanel" visible="false">
+                    <Label text="Pick a subtitle track - up arrow returns to toolbar" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                    <LabelList id="ccRow" translation="[0, 36]" itemSize="[520, 48]" numRows="8" drawFocusFeedback="true" />
+                </Group>
 
-            <Group id="ccStylePanel" visible="false">
-                <Label text="Caption Style - up arrow returns to toolbar" font="font:MediumBoldSystemFont" color="0xffffffff" />
-                <LabelList id="ccStyleRow" translation="[0, 36]" itemSize="[420, 48]" numRows="11" drawFocusFeedback="true" />
-            </Group>
+                <Group id="ccStylePanel" visible="false">
+                    <Label text="Caption Style - up arrow returns to toolbar" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                    <LabelList id="ccStyleRow" translation="[0, 36]" itemSize="[420, 48]" numRows="11" drawFocusFeedback="true" />
+                </Group>
 
-            <Group id="audioPanel" visible="false">
-                <Label text="Pick an audio track - up arrow returns to toolbar" font="font:MediumBoldSystemFont" color="0xffffffff" />
-                <LabelList id="audioRow" translation="[0, 36]" itemSize="[420, 48]" numRows="6" drawFocusFeedback="true" />
+                <Group id="audioPanel" visible="false">
+                    <Label text="Pick an audio track - up arrow returns to toolbar" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                    <LabelList id="audioRow" translation="[0, 36]" itemSize="[420, 48]" numRows="6" drawFocusFeedback="true" />
+                </Group>
             </Group>
         </LayoutGroup>
     </children>
