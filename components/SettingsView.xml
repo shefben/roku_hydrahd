@@ -56,6 +56,22 @@
             </Group>
 
             <Group>
+                <Label text="Home Banner Trailers" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                <Label id="trailerValue" translation="[0, 34]" width="1760" wrap="true" maxLines="1"
+                       text="" font="font:SmallSystemFont" color="0x9a9a9aff" />
+                <ButtonGroup id="trailerRow" translation="[0, 70]" layoutDirection="horiz" itemSpacings="[12]" minWidth="150" />
+            </Group>
+
+            <Group>
+                <Label text="Auto-Update" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                <Label translation="[0, 34]" width="1760" wrap="true" maxLines="2"
+                       text="The channel checks for a new version at every start. Installing one needs this Roku's developer (rokudev) password, the one chosen when Developer Mode was enabled."
+                       font="font:SmallSystemFont" color="0x9a9a9aff" />
+                <Label id="updateValue" translation="[0, 86]" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" />
+                <ButtonGroup id="updateRow" translation="[0, 118]" layoutDirection="horiz" itemSpacings="[12]" minWidth="220" />
+            </Group>
+
+            <Group>
                 <Label text="Captions" font="font:MediumBoldSystemFont" color="0xffffffff" />
                 <Label translation="[0, 30]" text="Choose default size, text color, and background - applied to every video."
                        font="font:SmallSystemFont" color="0x9a9a9aff" />

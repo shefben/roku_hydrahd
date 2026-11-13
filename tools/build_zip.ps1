@@ -106,6 +106,21 @@ try {
         if ($checkZip) { $checkZip.Dispose() }
     }
 
+    # Publish for the auto-updater: update/version.txt + update/<version>.zip.
+    # Skipped when a resolver address was baked in, so a private LAN IP never
+    # ends up in the repo.
+    if (-not $resolver) {
+        $mf = Get-Content -LiteralPath (Join-Path $src 'manifest')
+        $ver = (($mf | Where-Object { $_ -match '^update_version=' }) -replace '^[^=]+=', '').Trim()
+        if ($ver -notmatch '^\d+(\.\d+)*$') { throw "manifest has no usable update_version (got '$ver')" }
+        $upd = Join-Path $src 'update'
+        New-Item -ItemType Directory -Force -Path $upd | Out-Null
+        Get-ChildItem -LiteralPath $upd -Filter '*.zip' | Remove-Item -Force
+        Copy-Item -LiteralPath $zip -Destination (Join-Path $upd "$ver.zip")
+        [System.IO.File]::WriteAllText((Join-Path $upd 'version.txt'), $ver)
+        Write-Host "[build_zip] Published update/$ver.zip and update/version.txt"
+    }
+
     $size = (Get-Item -LiteralPath $zip).Length
     if ($resolver) {
         Write-Host "[build_zip] Built $zip ($size bytes) with fallback resolver $resolver"

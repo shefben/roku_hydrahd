@@ -78,6 +78,90 @@ sub init()
     ' user picks a mirror to play, ResolveTask will pick the new URL
     ' straight out of the registry.
     if U_PrefDefault("resolverUrl", "") = "" then startResolverDiscovery()
+
+    ' Look for a newer build on every launch.
+    m.updateDialog = m.top.findNode("updateDialog")
+    m.updateText = m.top.findNode("updateText")
+    m.updateTitle = m.top.findNode("updateTitle")
+    m.updateChoices = m.top.findNode("updateChoices")
+    m.updateChoices.observeField("buttonSelected", "onUpdateChoice")
+    m.updateVersion = ""
+    m.updateBusy = false
+    startUpdateTask("check", "")
+end sub
+
+' --- Auto-update -------------------------------------------------------
+
+sub startUpdateTask(mode as String, version as String)
+    task = CreateObject("roSGNode", "UpdateTask")
+    if task = invalid then return
+    task.observeField("result", "onUpdateResult")
+    task.mode = mode
+    task.version = version
+    task.password = U_PrefDefault("devPassword", "")
+    m.updateTask = task
+    task.control = "RUN"
+end sub
+
+sub onUpdateResult(event as Object)
+    res = event.getData()
+    m.updateTask = invalid
+    if res = invalid then return
+    if res.mode = "check" then
+        if res.available <> true then return
+        ' Never interrupt playback with the prompt; it will be offered
+        ' again on the next launch.
+        if m.viewStack.Count() > 0 and m.viewStack[m.viewStack.Count() - 1].name = "PlayerView" then return
+        m.updateVersion = res.latest
+        m.updateTitle.text = "Update available"
+        m.updateText.text = "Version " + res.latest + " is available (installed: " + res.current + "). Update now, or wait until the next time the channel starts?"
+        showUpdateDialog(["Update Now", "Later"])
+        return
+    end if
+    ' Install finished without the channel being restarted under us.
+    m.updateBusy = false
+    if res.ok = true then
+        m.updateTitle.text = "Update installed"
+        m.updateText.text = "Restart the channel to use the new version."
+    else
+        m.updateTitle.text = "Update failed"
+        m.updateText.text = res.message
+    end if
+    showUpdateDialog(["OK"])
+end sub
+
+sub showUpdateDialog(buttons as Object)
+    m.updateChoices.buttons = buttons
+    m.updateChoices.visible = true
+    m.updateDialog.visible = true
+    m.updateChoices.setFocus(true)
+    m.updateChoices.focusButton = 0
+end sub
+
+sub closeUpdateDialog()
+    m.updateDialog.visible = false
+    focusActiveChild()
+end sub
+
+sub onUpdateChoice()
+    idx = m.updateChoices.buttonSelected
+    buttons = m.updateChoices.buttons
+    if idx = invalid or buttons = invalid or idx < 0 or idx >= buttons.Count() then return
+    if buttons[idx] <> "Update Now" then
+        closeUpdateDialog()
+        return
+    end if
+    if U_PrefDefault("devPassword", "") = "" then
+        m.updateTitle.text = "Developer password needed"
+        m.updateText.text = "To install updates the channel needs this Roku's developer (rokudev) password. Enter it under Options > Settings > Auto-Update, then restart the channel."
+        showUpdateDialog(["OK"])
+        return
+    end if
+    m.updateBusy = true
+    m.updateTitle.text = "Updating to " + m.updateVersion
+    m.updateText.text = "Downloading and installing. The channel will restart by itself when it is done."
+    m.updateChoices.visible = false
+    startUpdateTask("install", m.updateVersion)
 end sub
 
 sub startResolverDiscovery()
@@ -97,7 +181,7 @@ sub onResolverDiscovered(event as Object)
     m.discoverTask = invalid
 end sub
 
-sub pushView(viewName as String, args as Dynamic)
+sub pushView(viewName as String, args as Dynamic, state = invalid as Dynamic)
     ' Clear any carry-over loading overlay from the previous view. When
     ' the user clicks a poster while HomeView is still mid-fetch (or any
     ' other transition where the outgoing view never got to set
@@ -106,6 +190,10 @@ sub pushView(viewName as String, args as Dynamic)
     ' view's contents (e.g. DetailsView's Play/Mirror buttons) until
     ' the new view's own task completes and fires loading=false.
     setLoading(false)
+
+    ' Let the outgoing view release anything that must not outlive it
+    ' (the Home banner trailer holds the video decoder the player needs).
+    if m.activeChild <> invalid and m.activeChild.hasField("suspend") then m.activeChild.suspend = true
 
     while m.contentHost.getChildCount() > 0
         m.contentHost.removeChildIndex(0)
@@ -120,7 +208,16 @@ sub pushView(viewName as String, args as Dynamic)
     ' background. The eventual loading=false from onDetailResult is
     ' a no-op against an already-hidden overlay, so the chrome stays
     ' in sync.
-    if args <> invalid then child.args = args
+    ' Coming back to a view: hand it the state it saved when the user left
+    ' (filter, loaded pages, cursor) as args.restore. The stack keeps the
+    ' original args so a later fresh open is not affected.
+    childArgs = args
+    if state <> invalid then
+        childArgs = {}
+        if args <> invalid then childArgs.Append(args)
+        childArgs.restore = state
+    end if
+    if childArgs <> invalid then child.args = childArgs
     child.observeField("requestNav", "onChildNavRequest")
     child.observeField("loading", "onChildLoading")
     m.activeChild = child
@@ -180,6 +277,17 @@ sub focusActiveChild()
     if m.activeChild <> invalid then m.activeChild.setFocus(true)
 end sub
 
+' Views are destroyed when another opens on top of them. A view that wants
+' to come back where the user left it publishes a viewState; keep it on
+' that view's stack entry for popView.
+sub saveActiveViewState()
+    if m.activeChild = invalid or m.viewStack.Count() = 0 then return
+    if not m.activeChild.hasField("viewState") then return
+    st = m.activeChild.viewState
+    if st = invalid or st.Count() = 0 then return
+    m.viewStack[m.viewStack.Count() - 1].state = st
+end sub
+
 sub replaceView(viewName as String, args as Dynamic)
     if m.viewStack.Count() > 0 then m.viewStack.Pop()
     pushView(viewName, args)
@@ -190,7 +298,7 @@ sub popView()
     if m.viewStack.Count() <= 1 then return
     m.viewStack.Pop()
     prev = m.viewStack.Pop()
-    pushView(prev.name, prev.args)
+    pushView(prev.name, prev.args, prev.state)
     focusActiveChild()
 end sub
 
@@ -242,6 +350,7 @@ sub onChildNavRequest(event as Object)
         m.discoverTask = invalid
     end if
     if action = "open" then
+        saveActiveViewState()
         pushView(payload.view, payload.args)
         focusActiveChild()
     else if action = "replace" then
@@ -370,6 +479,18 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             return true
         end if
         return false   ' let the ButtonGroup handle left/right/OK
+    end if
+
+    ' Update prompt traps input while visible; BACK means "later" unless
+    ' an install is running.
+    if m.updateDialog <> invalid and m.updateDialog.visible then
+        if m.updateBusy then return true
+        if key = "back" then
+            closeUpdateDialog()
+            return true
+        end if
+        if key = "up" or key = "down" then return true
+        return false
     end if
 
     ' OPTIONS (`*` on the Roku remote) is reserved for the active

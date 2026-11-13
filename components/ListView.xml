@@ -4,6 +4,9 @@
         <field id="args" type="assocarray" onChange="onArgs" />
         <field id="requestNav" type="assocarray" alwaysNotify="true" />
         <field id="loading" type="bool" alwaysNotify="true" />
+        <!-- Filter, loaded items and cursor, published when the user opens
+             a title. MainScene hands it back as args.restore on BACK. -->
+        <field id="viewState" type="assocarray" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/ListView.brs" />

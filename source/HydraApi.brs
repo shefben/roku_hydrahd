@@ -277,6 +277,21 @@ function HA_FetchTvDetails(href as String, slug as String) as Object
     return HA_ParseDetails(html, "tv", slug, url)
 end function
 
+' Synopsis and YouTube trailer id for the home banner. text is empty when
+' the page has no synopsis (the meta description is site boilerplate, so
+' it is not used as a fallback); trailerId is empty when the page links
+' no trailer, which is the case for TV shows.
+function HA_FetchBannerInfo(href as String) as Object
+    info = { text: "", trailerId: "" }
+    if href = invalid or href = "" then return info
+    html = HA_Get(href, HA_Base() + "/")
+    if html = invalid or html = "" then return info
+    info.trailerId = U_FirstMatch(html, "youtube\.com/embed/([A-Za-z0-9_-]{11})")
+    desc = U_FirstMatch(html, "<p style=" + chr(34) + "font-size:16px;color:\s*#fff" + chr(34) + ">([^<]+)</p>")
+    info.text = U_Trim(U_HtmlDecode(desc))
+    return info
+end function
+
 function HA_ParseDetails(html as String, kind as String, id as String, baseHref as String) as Object
     info = {
         kind: kind

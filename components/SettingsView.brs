@@ -38,6 +38,16 @@ sub init()
     m.qualityRow.buttons = ["Best", "1080p", "720p", "Data Saver"]
     m.qualityRow.observeField("buttonSelected", "onQualitySelected")
 
+    m.trailerValue = m.top.findNode("trailerValue")
+    m.trailerRow = m.top.findNode("trailerRow")
+    m.trailerRow.buttons = ["Off", "On"]
+    m.trailerRow.observeField("buttonSelected", "onTrailerRowSelected")
+
+    m.updateValue = m.top.findNode("updateValue")
+    m.updateRow = m.top.findNode("updateRow")
+    m.updateRow.buttons = ["Set Password...", "Clear"]
+    m.updateRow.observeField("buttonSelected", "onUpdateRowSelected")
+
     m.ccSizeRow = m.top.findNode("ccSizeRow")
     m.ccSizeRow.buttons = ["Text: Small", "Text: Medium", "Text: Large"]
     m.ccSizeRow.observeField("buttonSelected", "onCcSizeSelected")
@@ -54,7 +64,7 @@ sub init()
     m.urlActionsRow.buttons = ["Save", "Cancel"]
     m.urlActionsRow.observeField("buttonSelected", "onUrlActionsSelected")
 
-    m.rowOrder = [m.baseRow, m.tmdbRow, m.inChannelRow, m.resolverRow, m.qualityRow, m.ccSizeRow, m.ccColorRow, m.ccBgRow]
+    m.rowOrder = [m.baseRow, m.tmdbRow, m.inChannelRow, m.resolverRow, m.qualityRow, m.trailerRow, m.updateRow, m.ccSizeRow, m.ccColorRow, m.ccBgRow]
     m.currentRow = 0
 
     m.editTarget = ""
@@ -102,7 +112,40 @@ sub refresh()
         m.inChannelValue.text = "Currently: OFF - use the external resolver URL below."
         m.inChannelValue.color = "0xc8c8c8ff"
     end if
+    if U_PrefDefault("bannerTrailers", true) then
+        m.trailerValue.text = "Currently: ON - the highlighted title's trailer plays (with sound) on the Home banner."
+        m.trailerValue.color = "0x9affa0ff"
+    else
+        m.trailerValue.text = "Currently: OFF - the Home banner shows artwork only."
+        m.trailerValue.color = "0xc8c8c8ff"
+    end if
+    ver = CreateObject("roAppInfo").GetValue("update_version")
+    if U_PrefDefault("devPassword", "") = "" then
+        m.updateValue.text = "Installed version " + ver + " - password not set, updates can be offered but not installed."
+        m.updateValue.color = "0xc8c8c8ff"
+    else
+        m.updateValue.text = "Installed version " + ver + " - password saved, updates can install."
+        m.updateValue.color = "0x9affa0ff"
+    end if
     paintCcPreview()
+end sub
+
+sub onUpdateRowSelected()
+    if m.updateRow.buttonSelected = 0 then
+        openUrlEditor("devPassword", "Enter this Roku's developer (rokudev) password", U_PrefDefault("devPassword", ""))
+    else
+        U_PrefSet("devPassword", "")
+        refresh()
+    end if
+end sub
+
+sub onTrailerRowSelected()
+    if m.trailerRow.buttonSelected = 0 then
+        U_PrefSet("bannerTrailers", "false")
+    else
+        U_PrefSet("bannerTrailers", "true")
+    end if
+    refresh()
 end sub
 
 sub onInChannelRowSelected()

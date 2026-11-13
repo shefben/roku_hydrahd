@@ -4,6 +4,10 @@
         <field id="args" type="assocarray" />
         <field id="requestNav" type="assocarray" alwaysNotify="true" />
         <field id="loading" type="bool" alwaysNotify="true" />
+        <!-- Focused row/tile, published when the user opens a title. -->
+        <field id="viewState" type="assocarray" />
+        <!-- Set by MainScene just before this view is torn down. -->
+        <field id="suspend" type="bool" alwaysNotify="true" onChange="onSuspend" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/HomeView.brs" />
@@ -20,14 +24,28 @@
             <!-- scaleToZoom fills the wide banner while preserving the
                  image's aspect ratio (crops the excess) instead of
                  stretching a portrait poster into a landscape band. -->
-            <Poster id="heroBackdrop" translation="[0, 0]" width="1920" height="430"
-                    loadDisplayMode="scaleToZoom" failedBitmapUri="pkg:/images/placeholder.png" />
+            <!-- The art is a portrait poster, far taller than the band once
+                 it is scaled to full width. Size it at 2:3 and clip to the
+                 band so the TOP of the poster shows (faces and title art),
+                 instead of scaleToZoom's centre crop. -->
+            <Group id="heroClip" clippingRect="[0, 0, 1920, 430]">
+                <Poster id="heroBackdrop" translation="[0, 0]" width="1920" height="2880"
+                        loadWidth="1280" loadHeight="1920"
+                        loadDisplayMode="scaleToZoom" failedBitmapUri="pkg:/images/placeholder.png" />
+            </Group>
             <Poster id="heroScrim" translation="[0, 0]" width="1920" height="430"
                     uri="pkg:/images/hero_scrim.png" loadDisplayMode="scaleToFill" />
-            <Label id="heroTitle" translation="[70, 250]" width="1160" maxLines="2"
+            <!-- Title is bottom-aligned in its box so a one-line title
+                 still sits directly above the meta line. -->
+            <Label id="heroTitle" translation="[70, 70]" width="1160" height="120" wrap="true"
+                   maxLines="2" vertAlign="bottom"
                    text="" font="font:LargeBoldSystemFont" color="0xffffffff" />
-            <Label id="heroMeta" translation="[70, 348]" width="1160" maxLines="1"
+            <Label id="heroMeta" translation="[70, 198]" width="1160" maxLines="1"
                    text="" font="font:MediumSystemFont" color="0xd0d0d0ff" />
+            <!-- Synopsis of the focused title, fetched after the cursor
+                 settles (see onDescTimer). -->
+            <Label id="heroDesc" translation="[70, 248]" width="1160" wrap="true" maxLines="3"
+                   lineSpacing="2" text="" font="font:SmallSystemFont" color="0xe6e6e6ff" />
             <Label id="heroHint" translation="[70, 388]" width="1160" maxLines="1"
                    text="OK to open  -  LEFT/RIGHT to browse  -  UP for menu"
                    font="font:SmallestSystemFont" color="0x9a9a9aff" />
@@ -49,6 +67,18 @@
                  rowLabelFont="font:MediumBoldSystemFont"
                  rowLabelColor="0xffffffff"
                  focusXOffset="0" />
+
+        <!-- Trailer preview, top right of the banner. Starts after the
+             cursor has rested on a tile (trailerTimer) and is never
+             focusable: the rows keep the remote. -->
+        <Group id="trailerBox" translation="[1250, 36]" visible="false">
+            <Rectangle translation="[-3, -3]" width="630" height="357" color="0xffffff55" />
+            <Rectangle width="624" height="351" color="0x000000ff" />
+            <Video id="trailer" width="624" height="351" enableUI="false" />
+        </Group>
+
+        <Timer id="descTimer" duration="0.45" repeat="false" />
+        <Timer id="trailerTimer" duration="1.2" repeat="false" />
 
         <Label id="empty" translation="[70, 250]" width="1600" wrap="true"
                text="No content. Pull-to-refresh by pressing OK."

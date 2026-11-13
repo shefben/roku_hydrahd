@@ -221,6 +221,8 @@ sub onArgs()
     ' would visibly interrupt playback.
     if m.queueInjectOnly then
         m.queueInjectOnly = false
+        ' The queue just arrived: the menu can now offer the next episode.
+        if m.overlay <> invalid and m.overlay.visible then rebuildActionBar()
         return
     end if
     m.title.text = a.title
@@ -1243,10 +1245,14 @@ sub rebuildActionBar()
     end if
     ' Time-based next-ep button. Omit when an outro chapter is already
     ' offering "Play Next Episode" to avoid a duplicate entry.
-    if m.nextEpActive and m.activeChapterKind <> "outro" then
-        labels.Push("Skip to Next Episode")
-    end if
+    ' It leads the bar during the last minutes of the episode. The rest of
+    ' the time it is still offered (the floating prompt only lasts 30 s),
+    ' but sits just before Stop so opening the menu does not put the
+    ' cursor on it.
+    offerNextEp = hasNextEpisode() and m.activeChapterKind <> "outro"
+    if offerNextEp and m.nextEpActive then labels.Push("Skip to Next Episode")
     for each l in m.baseActionLabels
+        if l = "Stop" and offerNextEp and not m.nextEpActive then labels.Push("Skip to Next Episode")
         labels.Push(l)
     end for
     m.actionBar.buttons = labels
@@ -1262,6 +1268,14 @@ sub rebuildActionBar()
         end for
     end if
 end sub
+
+' True when this is a TV episode with another one queued after it.
+function hasNextEpisode() as Boolean
+    a = m.top.args
+    if a = invalid or a.kind <> "tv" then return false
+    if a.episodeQueue = invalid or a.episodeQueueIndex = invalid then return false
+    return a.episodeQueueIndex + 1 < a.episodeQueue.Count()
+end function
 
 ' Perform the skip the banner advertised. For TV outros we try to
 ' auto-advance to the next episode (mirrors the existing finished-state
@@ -1737,34 +1751,20 @@ sub onCcStyleChosen()
 end sub
 
 sub switchSource(url as String, fmt as String, resumeAt = 0 as Integer)
-    m.finishedRetries = 0
-    cn = createObject("roSGNode", "ContentNode")
-    cn.url = url
-    if fmt = invalid or fmt = "" then fmt = U_StreamFormat(url)
-    cn.streamFormat = fmt
-    cn.title = m.title.text
-    ' Same essentials startPlayback sets. Without the certificate bundle an
-    ' https rendition fails to load, and without playStart the switch
-    ' restarts from 0:00 (a seek issued before the new content is ready is
-    ' dropped).
-    cn.live = false
-    cn.httpCertificatesFile = "common:/certs/ca-bundle.crt"
-    if resumeAt > 0 then cn.playStart = resumeAt
-    if m.top.args <> invalid and m.top.args.poster <> invalid then cn.HDPosterUrl = m.top.args.poster
-    applyBandwidthWindow(cn)
-    m.currentPlayUrl = url
-    m.currentPlayFmt = fmt
-    if m.video.content <> invalid then
-        if m.video.content.subtitleTracks <> invalid then
-            cn.subtitleTracks = m.video.content.subtitleTracks
-        end if
-        if m.video.content.httpHeaders <> invalid then
-            cn.httpHeaders = m.video.content.httpHeaders
-        end if
-    end if
+    ' Go through startPlayback, the path every stream already opens with.
+    ' This used to build its own ContentNode and copy httpHeaders from the
+    ' old one. That field is never invalid (it defaults to an empty list),
+    ' and assigning it makes Roku drop the roHttpAgent headers, so the new
+    ' rendition was requested without Referer / Origin / User-Agent and the
+    ' CDN refused it until the player gave up.
+    keepSub = m.activeSubtitle
+    m.startPosition = resumeAt
     m.video.control = "stop"
-    m.video.content = cn
-    m.video.control = "play"
+    startPlayback(url, fmt)
+    if keepSub <> m.activeSubtitle then
+        m.activeSubtitle = keepSub
+        applySubtitleSelection()
+    end if
 end sub
 
 ' Apply the user's caption style (size / color / background) to the custom

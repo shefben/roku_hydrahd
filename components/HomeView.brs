@@ -7,6 +7,21 @@ sub init()
     m.heroBackdrop = m.top.findNode("heroBackdrop")
     m.heroTitle = m.top.findNode("heroTitle")
     m.heroMeta = m.top.findNode("heroMeta")
+    m.heroDesc = m.top.findNode("heroDesc")
+    m.descTimer = m.top.findNode("descTimer")
+    m.descTimer.observeField("fire", "onDescTimer")
+    m.descCache = {}
+    m.heroHref = ""
+    ' Trailer preview state. trailerIds: href -> YouTube id from the
+    ' title page ("" when it has none); trailerUrls: href -> MP4.
+    m.trailerBox = m.top.findNode("trailerBox")
+    m.trailer = m.top.findNode("trailer")
+    m.trailerTimer = m.top.findNode("trailerTimer")
+    m.trailerTimer.observeField("fire", "onTrailerTimer")
+    m.trailer.observeField("state", "onTrailerState")
+    m.trailerIds = {}
+    m.trailerUrls = {}
+    m.heroInfo = { title: "", year: "", kind: "" }
     m.rows.observeField("rowItemSelected", "onItemSelected")
     ' Hero mirrors the focused tile.
     m.rows.observeField("rowItemFocused", "onRowItemFocused")
@@ -68,6 +83,140 @@ sub updateHero(cell as Object)
         meta = meta + parts[i]
     end for
     m.heroMeta.text = meta
+
+    ' Synopsis. Cards do not carry one, so it comes from the title's own
+    ' page: cached per title, and only requested once the cursor has
+    ' rested on a tile so scrolling a row does not fire a fetch per tile.
+    href = ""
+    if cell.url <> invalid then href = cell.url
+    m.heroHref = href
+    m.descTimer.control = "stop"
+    stopTrailer()
+    m.heroInfo = { title: "", year: "", kind: k }
+    if cell.title <> invalid then m.heroInfo.title = cell.title
+    if yr <> invalid then m.heroInfo.year = yr
+    if href <> "" and m.descCache.DoesExist(href) then
+        m.heroDesc.text = m.descCache[href]
+        m.trailerTimer.control = "start"
+    else
+        m.heroDesc.text = ""
+        if href <> "" then m.descTimer.control = "start"
+    end if
+end sub
+
+sub onDescTimer()
+    if m.heroHref = "" then return
+    if m.descTask <> invalid then
+        m.descTask.unobserveField("result")
+        m.descTask.control = "STOP"
+    end if
+    m.descTask = createObject("roSGNode", "SynopsisTask")
+    m.descTask.observeField("result", "onDescResult")
+    m.descTask.href = m.heroHref
+    m.descTask.control = "RUN"
+end sub
+
+sub onDescResult()
+    if m.descTask = invalid then return
+    res = m.descTask.result
+    m.descTask.unobserveField("result")
+    m.descTask = invalid
+    if res = invalid or res.href = invalid or res.href = "" then return
+    text = ""
+    if res.text <> invalid then text = res.text
+    m.descCache[res.href] = text
+    tid = ""
+    if res.trailerId <> invalid then tid = res.trailerId
+    m.trailerIds[res.href] = tid
+    if res.href <> m.heroHref then return
+    m.heroDesc.text = text
+    m.trailerTimer.control = "start"
+end sub
+
+' --- Trailer preview ---------------------------------------------------
+
+' Cursor has stayed on this tile: find and play its trailer.
+sub onTrailerTimer()
+    href = m.heroHref
+    if href = "" then return
+    if not U_PrefDefault("bannerTrailers", true) then return
+    ' Only while the user is on the rows - not while the top bar, side
+    ' menu or exit prompt has the remote.
+    if not m.rows.isInFocusChain() then return
+    if m.trailerUrls.DoesExist(href) then
+        playTrailer(m.trailerUrls[href])
+        return
+    end if
+    vid = ""
+    if m.trailerIds.DoesExist(href) then vid = m.trailerIds[href]
+    cancelTrailerTask()
+    m.trailerTask = createObject("roSGNode", "TrailerTask")
+    m.trailerTask.observeField("result", "onTrailerResult")
+    m.trailerTask.href = href
+    m.trailerTask.videoId = vid
+    m.trailerTask.title = m.heroInfo.title
+    m.trailerTask.year = m.heroInfo.year
+    m.trailerTask.kind = m.heroInfo.kind
+    m.trailerTask.control = "RUN"
+end sub
+
+sub onTrailerResult()
+    if m.trailerTask = invalid then return
+    res = m.trailerTask.result
+    m.trailerTask.unobserveField("result")
+    m.trailerTask = invalid
+    if res = invalid or res.href = invalid or res.url = invalid then return
+    ' An empty URL is cached too, so a title without a trailer is not
+    ' looked up again every time the cursor passes over it.
+    m.trailerUrls[res.href] = res.url
+    if res.href = m.heroHref and m.rows.isInFocusChain() then playTrailer(res.url)
+end sub
+
+sub playTrailer(url as String)
+    if url = "" then return
+    cn = createObject("roSGNode", "ContentNode")
+    cn.url = url
+    cn.streamFormat = "mp4"
+    cn.live = false
+    cn.httpCertificatesFile = "common:/certs/ca-bundle.crt"
+    m.trailerPlaying = true
+    m.trailerBox.visible = true
+    m.trailer.content = cn
+    m.trailer.control = "play"
+end sub
+
+sub onSuspend()
+    stopTrailer()
+    m.descTimer.control = "stop"
+end sub
+
+sub cancelTrailerTask()
+    if m.trailerTask = invalid then return
+    m.trailerTask.unobserveField("result")
+    m.trailerTask.control = "STOP"
+    m.trailerTask = invalid
+end sub
+
+sub stopTrailer()
+    m.trailerTimer.control = "stop"
+    cancelTrailerTask()
+    m.trailerBox.visible = false
+    if m.trailerPlaying = true then
+        m.trailerPlaying = false
+        m.trailer.control = "stop"
+    end if
+end sub
+
+' Trailer ended or could not be played: put the banner art back. A failed
+' URL is forgotten so the next visit fetches a fresh one (they expire).
+sub onTrailerState()
+    s = m.trailer.state
+    if s <> "finished" and s <> "error" then return
+    if m.trailerPlaying <> true then return
+    if s = "error" and m.heroHref <> "" then m.trailerUrls.Delete(m.heroHref)
+    m.trailerPlaying = false
+    m.trailerBox.visible = false
+    m.trailer.control = "stop"
 end sub
 
 sub onSelfFocusChanged()
@@ -176,9 +325,25 @@ sub onResult()
     m.hero.visible = true
     m.empty.visible = false
     if rootContent.getChildCount() > 0 then
-        m.rows.jumpToRowItem = [0, 0]
-        firstRow = rootContent.getChild(0)
-        if firstRow <> invalid and firstRow.getChildCount() > 0 then updateHero(firstRow.getChild(0))
+        ' Back from a title: return to the tile that was opened. Rows are
+        ' matched by title because Continue Watching / My List can appear
+        ' or vanish between visits and shift the indexes.
+        rowIdx = 0
+        colIdx = 0
+        a = m.top.args
+        if a <> invalid and a.restore <> invalid and a.restore.col <> invalid and a.restore.rowTitle <> invalid then
+            for i = 0 to rootContent.getChildCount() - 1
+                if rootContent.getChild(i).title = a.restore.rowTitle then
+                    rowIdx = i
+                    colIdx = W_AsInt(a.restore.col)
+                    exit for
+                end if
+            end for
+        end if
+        startRow = rootContent.getChild(rowIdx)
+        if colIdx < 0 or colIdx >= startRow.getChildCount() then colIdx = 0
+        m.rows.jumpToRowItem = [rowIdx, colIdx]
+        if startRow.getChildCount() > 0 then updateHero(startRow.getChild(colIdx))
     end if
     ' Re-grab focus now that there's actually something to focus on -
     ' but only if the user is still inside HomeView. If they UPed to
@@ -208,6 +373,9 @@ sub onItemSelected()
     if rowContent = invalid then return
     item = rowContent.getChild(colIdx)
     if item = invalid then return
+    ' The player needs the video decoder: release it before leaving.
+    stopTrailer()
+    m.top.viewState = { rowTitle: rowContent.title, col: colIdx }
     href = ""
     if item.url <> invalid then href = item.url
     kind = "movie"

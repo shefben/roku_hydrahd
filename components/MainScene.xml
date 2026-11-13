@@ -71,5 +71,19 @@
             <ButtonGroup id="exitChoices" translation="[770, 572]" layoutDirection="horiz"
                          itemSpacings="[24]" minWidth="180" />
         </Group>
+
+        <!-- Update prompt, shown at launch when update/version.txt in the
+             repo is newer than this build. -->
+        <Group id="updateDialog" visible="false">
+            <Rectangle width="1920" height="1080" color="0x000000dd" />
+            <Rectangle translation="[560, 380]" width="800" height="310" color="0x161616ff" />
+            <Rectangle translation="[560, 380]" width="800" height="4" color="0xff2424ff" />
+            <Label id="updateTitle" translation="[560, 412]" width="800" height="50" text="Update available"
+                   horizAlign="center" vertAlign="center" font="font:LargeBoldSystemFont" color="0xffffffff" />
+            <Label id="updateText" translation="[600, 476]" width="720" height="104" wrap="true" maxLines="3"
+                   text="" horizAlign="center" vertAlign="center" font="font:SmallSystemFont" color="0xc8c8c8ff" />
+            <ButtonGroup id="updateChoices" translation="[700, 604]" layoutDirection="horiz"
+                         itemSpacings="[24]" minWidth="240" />
+        </Group>
     </children>
 </component>

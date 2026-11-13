@@ -51,6 +51,24 @@ sub onArgs()
     else
         m.activePath = ""
     end if
+    ' Returning from a title: reopen on the same filter, with the same
+    ' pages loaded and the cursor on the title that was opened.
+    r = a.restore
+    if r <> invalid and r.items <> invalid and r.items.Count() > 0 then
+        if r.path <> invalid then m.activePath = r.path
+        buildFilterList()
+        m.page = W_AsInt(r.page)
+        m.allDone = (r.allDone = true)
+        m.items = []
+        m.empty.visible = false
+        root = createObject("roSGNode", "ContentNode")
+        addCells(root, r.items)
+        m.grid.content = root
+        focus = W_AsInt(r.focus)
+        if focus < 0 or focus >= m.items.Count() then focus = 0
+        m.grid.jumpToItem = focus
+        return
+    end if
     buildFilterList()
     m.page = 0
     m.allDone = false
@@ -232,6 +250,10 @@ sub appendItems(items as Object)
         root = createObject("roSGNode", "ContentNode")
         m.grid.content = root
     end if
+    addCells(root, items)
+end sub
+
+sub addCells(root as Object, items as Object)
     for each item in items
         cell = root.createChild("ContentNode")
         cell.title = item.title
@@ -339,6 +361,13 @@ sub onItemSelected()
     if idx = invalid or m.items = invalid then return
     if idx < 0 or idx >= m.items.Count() then return
     item = m.items[idx]
+    m.top.viewState = {
+        path: m.activePath
+        items: m.items
+        page: m.page
+        allDone: m.allDone
+        focus: idx
+    }
     m.top.requestNav = {
         action: "open"
         view: "DetailsView"
