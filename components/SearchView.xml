@@ -59,9 +59,9 @@
                        font="font:SmallestSystemFont" color="0x808080ff" width="800" />
             </Group>
 
-            <Group id="gridColumn" translation="[854, 70]">
+            <Group id="gridColumn" translation="[880, 70]">
                 <!-- Result type filter; reached by UP from the results grid. -->
-                <ButtonGroup id="typeToggle" translation="[0, 0]" layoutDirection="horiz"
+                <SearchTypeToggle id="typeToggle" translation="[0, 0]" layoutDirection="horiz"
                              itemSpacings="[10]" minWidth="120" />
                 <Label id="resultTitle" translation="[0, 54]" text="" font="font:MediumBoldSystemFont" color="0xffffffff" visible="false" />
                 <MarkupGrid id="grid" translation="[0, 92]"
@@ -78,9 +78,8 @@
         </Group>
 
         <Animation id="slideAnim" duration="0.3" repeat="false" easeFunction="outQuad">
-            <!-- -820 = enough to push the 60+754-wide keyboard column
-                 fully off the left edge while landing the grid column
-                 (originally at x=854) close to the screen's left margin. -->
+            <!-- Hide the keyboard and land the seven-column results
+                 at x=60, leaving room for posters across the screen. -->
             <Vector2DFieldInterpolator id="slideInterp"
                 key="[0.0, 1.0]"
                 keyValue="[[0,0], [-820,0]]"

@@ -23,6 +23,7 @@ sub init()
     m.trailerUrls = {}
     m.heroInfo = { title: "", year: "", kind: "" }
     m.rows.observeField("rowItemSelected", "onItemSelected")
+    m.rows.observeField("openMenu", "onOpenMenu")
     ' Hero mirrors the focused tile.
     m.rows.observeField("rowItemFocused", "onRowItemFocused")
     m.rows.itemComponentName = "PosterItem"
@@ -45,6 +46,11 @@ sub init()
     m.task.observeField("result", "onResult")
     m.top.loading = true
     m.task.control = "RUN"
+end sub
+
+' SidebarRowList catches the left edge before native RowList key handling.
+sub onOpenMenu()
+    m.top.requestNav = { action: "openMenu" }
 end sub
 
 ' Update the hero spotlight to whatever tile is focused in the rows.
@@ -457,9 +463,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     if key = "options" and m.rows.isInFocusChain() then
         if toggleFavoriteAtFocus() then return true
     end if
-    ' LEFT-to-sidebar from RowList is gone: RowList eats LEFT at col 0
-    ' silently and never bubbles. The sidebar trigger lives globally
-    ' on MainScene (LEFT on the leftmost nav button).
+    ' LEFT at column zero is handled by SidebarRowList.onKeyEvent.
     return false
 end function
 

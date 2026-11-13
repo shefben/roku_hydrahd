@@ -46,6 +46,7 @@ sub init()
     m.typeToggle = m.top.findNode("typeToggle")
     m.typeToggle.buttons = ["All", "Movies", "TV"]
     m.typeToggle.observeField("buttonSelected", "onTypeSelected")
+    m.typeToggle.observeField("navigate", "onTypeNavigate")
 
     m.timer = createObject("roSGNode", "Timer")
     m.timer.duration = 0.5
@@ -162,6 +163,10 @@ end sub
 sub showResults()
     if m.resultsMode then return
     m.resultsMode = true
+    focusedItem = m.grid.itemFocused
+    m.grid.numColumns = 7
+    m.grid.itemSpacing = [28, 22]
+    if focusedItem <> invalid and focusedItem >= 0 then m.grid.jumpToItem = focusedItem
     m.slideAnim.control = "stop"
     m.slideInterp.keyValue = [[0, 0], [-820, 0]]
     m.slideAnim.control = "start"
@@ -170,6 +175,10 @@ end sub
 sub showKeyboard()
     if not m.resultsMode then return
     m.resultsMode = false
+    focusedItem = m.grid.itemFocused
+    m.grid.numColumns = 4
+    m.grid.itemSpacing = [16, 22]
+    if focusedItem <> invalid and focusedItem >= 0 then m.grid.jumpToItem = focusedItem
     m.slideAnim.control = "stop"
     m.slideInterp.keyValue = [[-820, 0], [0, 0]]
     m.slideAnim.control = "start"
@@ -299,6 +308,14 @@ sub onTypeSelected()
     m.typeToggle.setFocus(true)
 end sub
 
+sub onTypeNavigate()
+    if m.typeToggle.navigate = "left" then
+        focusKeyboard()
+    else if m.typeToggle.navigate = "down" then
+        if m.grid.content <> invalid and m.grid.content.getChildCount() > 0 then m.grid.setFocus(true)
+    end if
+end sub
+
 function typeWord() as String
     if m.typeFilter = "movie" then return "movies"
     if m.typeFilter = "tv" then return "TV shows"
@@ -417,6 +434,8 @@ function chipNeighbor(delta as Integer) as Object
 end function
 
 sub focusKeyboard()
+    ' Focus and visibility must move together, including recovery paths.
+    showKeyboard()
     m.kbGrid.setFocus(true)
 end sub
 
@@ -439,11 +458,16 @@ end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
+    ' Return to editing before allowing MainScene to leave Search.
+    if key = "back" and m.resultsMode then
+        focusKeyboard()
+        return true
+    end if
 
     ' Safety net: if focus drifted to the root Group (e.g. focus race
     ' during view push), any directional key snaps to the keyboard so
     ' the user is never stranded with dead arrows.
-    if not m.grid.isInFocusChain() and not chipsHaveFocus() and not m.kbGrid.isInFocusChain() then
+    if not m.grid.isInFocusChain() and not chipsHaveFocus() and not m.kbGrid.isInFocusChain() and not m.typeToggle.isInFocusChain() then
         if key = "up" or key = "down" or key = "left" or key = "right" or key = "OK" then
             focusKeyboard()
             return true

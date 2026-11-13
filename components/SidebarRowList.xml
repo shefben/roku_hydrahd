@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="SidebarRowList" extends="RowList">
+    <interface>
+        <field id="openMenu" type="bool" value="false" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/SidebarRowList.brs" />
+</component>

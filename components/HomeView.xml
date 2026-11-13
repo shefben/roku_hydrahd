@@ -53,7 +53,7 @@
 
         <!-- One row visible at a time beneath the hero; UP/DOWN moves
              between rows and the hero follows the focused tile. -->
-        <RowList id="rows"
+        <SidebarRowList id="rows"
                  translation="[60, 452]"
                  itemSize="[1800, 470]"
                  numRows="1"

@@ -527,8 +527,8 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             end if
             ' Already at the leftmost nav button - LEFT here opens the
             ' side drawer (panel expanded directly, not just the strip).
-            ' Nav buttons bubble directional keys reliably; LEFT-from-
-            ' RowList-col-0 does NOT bubble on Roku.
+            ' Home's SidebarRowList provides its own left-edge trigger;
+            ' native RowList does not bubble LEFT at column zero.
             if m.sideMenu <> invalid and m.sideMenu.visible then
                 m.sideMenu.expandRequest = true
                 return true

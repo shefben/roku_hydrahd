@@ -117,11 +117,13 @@ end sub
 ' --- Internal -----------------------------------------------------------
 
 sub expand()
-    if m.expanded then return
-    m.expanded = true
-    m.expandInterp.keyValue = [[-460, 0], [0, 0]]
-    m.expandAnim.control = "stop"
-    m.expandAnim.control = "start"
+    if not m.expanded then
+        m.expanded = true
+        m.expandInterp.keyValue = [[-460, 0], [0, 0]]
+        m.expandAnim.control = "stop"
+        m.expandAnim.control = "start"
+    end if
+    ' Always reclaim focus, even if the panel was already open.
     ' Land focus on the first button (the close arrow) so the user
     ' instantly knows where they are and can press DOWN to navigate.
     ' ButtonGroup uses focusButton (write-only field that moves the
@@ -190,7 +192,13 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         return false
     end if
     ' Expanded state.
-    if key = "left" or key = "back" or key = "right" then
+    ' ButtonGroup handles movement between entries. Consume boundary
+    ' arrows here so UP from Close cannot escape to MainScene's top bar
+    ' while leaving the drawer open.
+    if key = "up" or key = "down" then return true
+    ' Repeated LEFT (including a held opening key) stays in the drawer.
+    if key = "left" then return true
+    if key = "back" or key = "right" then
         collapse()
         return true
     end if
