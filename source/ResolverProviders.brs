@@ -948,6 +948,16 @@ function RP_Resolve2embed(embedUrl as String, refer as String, session as Object
     final = page.finalUrl
     if final = invalid or final = "" then final = embedUrl
 
+    ' Current page: the player is lazy-loaded from data-src (vidsrc.buzz).
+    player = U_FirstMatch(page.body, "data-src=" + chr(34) + "(https?://[^" + chr(34) + "]+/embed/(?:movie|tv)/[^" + chr(34) + "]+)" + chr(34))
+    if player <> "" then
+        res = RP_ResolveVsrcPlayer(U_HtmlDecode(player), final, session)
+        if res <> invalid then return res
+        ' Same player on its sister host, which has its own server pool.
+        res = RP_ResolveVsrcPlayer(U_HtmlDecode(player).Replace("vidsrc.buzz", "videm.buzz"), final, session)
+        if res <> invalid then return res
+    end if
+
     swishRe = CreateObject("roRegex", "(?:data-src|src)=[" + chr(34) + "'](https?://streamsrcs\.2embed\.cc/swish\?[^" + chr(34) + "']+)[" + chr(34) + "']", "i")
     sm = swishRe.match(page.body)
     swishUrl = ""

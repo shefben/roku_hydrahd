@@ -306,3 +306,84 @@ function RP_XpassEncryptedSources(html as String, pageUrl as String, session as 
     if list = invalid or type(list) <> "roArray" then return []
     return list
 end function
+
+' --- 2embed.cc (vidsrc.buzz / videm.buzz player) ----------------------
+'
+' 2embed's page lazy-loads vidsrc.buzz/embed/<type>/<id> (data-src). That
+' player (videm.buzz runs the same one) server-renders its config as
+' `var Q = {...}`: a signed token `t` and a first list of servers. More
+' servers come from <base>api.php?a=sources&...&pf=1, and
+' api.php?a=play&ref=<server ref>&t=<t> mints a stream URL per server.
+' Most servers serve segments wrapped in a PNG image (the site's own
+' player strips the PNG header in JavaScript); Roku cannot, so each
+' server's first segment is checked and only plain MPEG-TS / fMP4 is used.
+function RP_ResolveVsrcPlayer(playerUrl as String, refer as String, session as Object) as Object
+    origin = HC_OriginOf(playerUrl)
+    if origin = "" then return invalid
+    page = HC_Get(session, playerUrl, { "Referer": refer }, 8000)
+    if page = invalid or page.body = "" then return invalid
+    cfg = ParseJson(U_FirstMatch(page.body, "var Q = (\{[^\n]*\});"))
+    if cfg = invalid or type(cfg) <> "roAssociativeArray" or cfg.t = invalid or cfg.id = invalid then
+        print "[vsrc] player config not found"
+        return invalid
+    end if
+    base = U_FirstMatch(page.body, "<base href=" + chr(34) + "([^" + chr(34) + "]*)" + chr(34))
+    if base = "" then base = "/"
+    api = RP_AbsUrl(base + "api.php", origin + "/")
+    pageRef = origin + "/"
+    headers = { "Referer": playerUrl }
+
+    servers = []
+    seen = {}
+    if cfg.ssr <> invalid and type(cfg.ssr) = "roAssociativeArray" and cfg.ssr.servers <> invalid then
+        for each s in cfg.ssr.servers
+            if s.ref <> invalid and s.k <> invalid and not seen.DoesExist(s.k) then
+                seen[s.k] = true
+                servers.Push(s)
+            end if
+        end for
+    end if
+    qs = "type=" + cfg.type + "&id=" + U_UrlEncode(cfg.id) + "&s=" + cfg.s.ToStr() + "&e=" + cfg.e.ToStr() + "&t=" + U_UrlEncode(cfg.t)
+    more = HC_Get(session, api + "?a=sources&" + qs + "&pf=1", headers, 8000)
+    if more <> invalid and more.body <> "" then
+        listing = ParseJson(more.body)
+        if listing <> invalid and type(listing) = "roAssociativeArray" and listing.servers <> invalid then
+            for each s in listing.servers
+                if s.ref <> invalid and s.k <> invalid and not seen.DoesExist(s.k) then
+                    seen[s.k] = true
+                    servers.Push(s)
+                end if
+            end for
+        end if
+    end if
+
+    tried = 0
+    for each s in servers
+        tried = tried + 1
+        if tried > 6 then exit for
+        play = HC_Get(session, api + "?a=play&ref=" + U_UrlEncode(s.ref) + "&t=" + U_UrlEncode(cfg.t), headers, 6000)
+        if play <> invalid and play.body <> "" then
+            info = ParseJson(play.body)
+            if info <> invalid and type(info) = "roAssociativeArray" and info.url <> invalid and info.url <> "" then
+                url = RP_AbsUrl(info.url, api)
+                master = HC_Get(session, url, { "Referer": pageRef }, 6000)
+                if master <> invalid and Left(master.body, 7) = "#EXTM3U" then
+                    if RP_HlsFirstSegmentOk(session, master.body, url, pageRef) then
+                        print "[vsrc] using "; s.name
+                        return {
+                            url: url
+                            streamFormat: "hls"
+                            qualities: []
+                            subtitles: []
+                            chapters: []
+                            referer: pageRef
+                            userAgent: ""
+                        }
+                    end if
+                    print "[vsrc] "; s.name; " segments not playable (PNG-wrapped or dead)"
+                end if
+            end if
+        end if
+    end for
+    return invalid
+end function

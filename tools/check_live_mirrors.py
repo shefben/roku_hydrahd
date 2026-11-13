@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / 'tools' / '.cache' / 'brs-node'
 WORK = ROOT / 'tools' / '.cache' / 'live'
 UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-SOURCES = ['Resolver', 'ResolverProviders', 'ResolverVidlove', 'ResolverVidfast', 'ResolverVaplayer', 'ResolverMirrors',
+SOURCES = ['Resolver', 'ResolverProviders', 'ResolverVidlove', 'ResolverVidfast', 'ResolverVaplayer', 'ResolverMirrors', 'ResolverVidy', 'ResolverMoviesapi',
            'HttpClient', 'Utils', 'HlsMeta',
            'Bytes', 'Rc4', 'EvpBytesToKey', 'AesGcm256', 'JsUnpack', 'HydraApi']
 TITLES = {

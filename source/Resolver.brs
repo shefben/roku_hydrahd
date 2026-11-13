@@ -190,13 +190,15 @@ function R_DispatchByHost(embedUrl as String, refer as String, session as Object
 
     if Instr(1, host, "lookmovie2.skin") > 0 then return RP_ResolveLookmovie(embedUrl, refer, session)
 
-    if Instr(1, host, "moviesapi.club") > 0 or Instr(1, host, "moviesapi.to") > 0 then return RP_ResolveMoviesapi(embedUrl, refer, session)
+    if Instr(1, host, "moviesapi.to") > 0 then return RP_ResolveMoviesapiTo(embedUrl, refer, session)
+    if Instr(1, host, "moviesapi.club") > 0 then return RP_ResolveMoviesapi(embedUrl, refer, session)
 
     if Instr(1, host, "vidora.stream") > 0 then return RP_ResolveVidora(embedUrl, refer, session)
 
     if Instr(1, host, "autoembed") > 0 then return RP_ResolveAutoembed(embedUrl, refer, session)
 
     if Instr(1, host, "xpass.top") > 0 then return RP_ResolveXpass(embedUrl, refer, session)
+    if Instr(1, host, "vidy.st") > 0 then return RP_ResolveVidy(embedUrl, refer, session)
     if host = "player.vidlove.cc" then return RP_ResolveVidlove(embedUrl, refer, session)
 
     ' airflix1 and ythd are two skins over one gated backend (ResolverVaplayer.brs).

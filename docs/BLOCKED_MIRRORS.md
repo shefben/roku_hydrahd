@@ -25,7 +25,10 @@ Run `python tools/check_live_mirrors.py` to redo this. It pulls HydraHD's curren
 | `vixsrc.to` (Hydra2) | `RP_ResolveVixsrc` | Audio is a separate rendition: qualities are pinned by bitrate on the master, never played as bare variant URLs. |
 | `airflix1.com` (Bravo), `ythd.org` (Hydra1) | `RP_ResolveVaplayer` | Stream list is ChaCha20; key lifted from a WASM module that rotates every 5 minutes. Token is single-use and IP-bound. |
 | `play.xpass.top` (Whiskey) | `RP_ResolveXpass` | Source list is AES-GCM behind `/data`; build id read from the player script. Most of its ~30 sources are dead or PNG-wrapped, so each is checked down to the first segment. |
-| `moviesapi.to`, `www.2embed.cc`, `www.vidy.st`, `primesrc.me` | none | Shown in the picker; play through the content-id fallback pool (a different mirror's stream). |
+| `www.vidy.st` (Beta) | `RP_ResolveVidy` (`ResolverVidy.brs`) | api.wecollege.net `/seed` + `/<server>/sources?...&enc=2`, XOR with a custom keystream keyed by (seed, tmdb), plaintext `mvm1`+JSON. miami/boise give 480p-2160p H.264 fMP4 ladders and ~25 subtitle tracks; others are single-HLS backups. Everything needs `Referer: https://www.vidy.st/`. |
+| `www.2embed.cc` (Echo) | `RP_ResolveVsrcPlayer` via `RP_Resolve2embed` | Page lazy-loads vidsrc.buzz (`data-src`); `var Q` token + `pl/api.php?a=sources&pf=1` / `a=play`. Only server VNH serves plain TS; VNY/VNR wrap segments in a PNG and are skipped. Single rendition. |
+| `moviesapi.to` (Golf) | `RP_ResolveMoviesapiTo` (`ResolverMoviesapi.brs`) | `/api/vidora/v1/...` with `x-player-key` from the page bundle (AES-128 HLS, needs moviesapi.to Referer); else cdn.vidspark.to's same API with `?source=`. Many movies have only PNG-wrapped or blocked sources there, so they fall back to the pool. |
+| `primesrc.me` (Hotel) | none | Server list is open (`/api/v1/s`), but every link (`/api/v1/l?key=`) is behind a Cloudflare managed challenge (403 "Just a moment...") and the page uses a Turnstile widget (sitekey `0x4AAAAAACox-LngVREu55Y4`). Plays via the fallback pool. |
 | `vidup.to`, `embedmaster.link` | none | Hidden (see table above). |
 
 The fallback pool in `R_BuildFallbackCandidates` now holds only the mirrors above. The old pool (vidlove, vidsrc.cc, videasy, vidking, vidrock, 2embed, moviesapi.club, autoembed) was unreachable or empty.
