@@ -1,0 +1,23 @@
+*.pyc
+*.clinerules-architect
+*.clinerules-ask
+*.clinerules-code
+*.clinerules-debug
+*.clinerules-test
+__pycache__
+
+# check_live_mirrors.py private brs-node install and scratch files
+tools/.cache/
+
+# Local build output and tool state
+HydraHD.zip
+node_modules/
+.headroom/
+.playwright-mcp/
+.qwen/
+.serena/
+.tokensave/
+.claude/.headroom_wrap_*
+resolver/state/
+screenshots/
+*.log

@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source": "moviebox",
+    "label": "MovieBox",
+    "url": "https://cdn.example/api?fixture=0",
+    "qualities": [
+      {
+        "quality": "1080p",
+        "codec": "h264",
+        "url": "https://cdn.example/api?fixture=1",
+        "type": "mp4"
+      },
+      {
+        "quality": "720p",
+        "codec": "h264",
+        "url": "https://cdn.example/api?fixture=2",
+        "type": "mp4"
+      },
+      {
+        "quality": "480p",
+        "codec": "h264",
+        "url": "https://cdn.example/api?fixture=3",
+        "type": "mp4"
+      },
+      {
+        "quality": "360p",
+        "codec": "h264",
+        "url": "https://cdn.example/api?fixture=4",
+        "type": "mp4"
+      }
+    ],
+    "lead": true
+  },
+  "subtitles": []
+}
