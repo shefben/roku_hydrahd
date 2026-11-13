@@ -218,134 +218,6 @@ function RP_AsStreamString(v as Dynamic) as String
     return ""
 end function
 
-' --- Phase 2: airflix1.com -------------------------------------------
-'
-' Calls https://streamdata.vaplayer.ru/api.php?(tmdb|imdb)=<id>&type=<kind>
-' [&season=&episode=]. The endpoint requires nextgencloudfabric.com as both
-' Referer and Origin (vaplayer.ru rejects requests from any other origin;
-' the previous brightpathsignals.com origin now 404s).
-' Returns { status_code, data: { stream_urls: [ "...m3u8", ... ] }, default_subs: [...] }.
-' Validates each candidate by GETing it and checking #EXTM3U prefix.
-' Port of server.py:1753.
-
-function RP_ResolveAirflix(embedUrl as String, refer as String, session as Object) as Object
-    pathRe = CreateObject("roRegex", "/embed/(movie|tv)/(tt\d+|\d+)(?:/(\d+)/(\d+))?", "i")
-    m = pathRe.match(embedUrl)
-    if m = invalid or m.Count() < 3 then return invalid
-    mediaType = m[1]
-    mediaId = m[2]
-    season = ""
-    episode = ""
-    if m.Count() >= 5 then
-        season = m[3]
-        episode = m[4]
-    end if
-
-    idParam = "tmdb"
-    if Left(mediaId, 2) = "tt" then idParam = "imdb"
-
-    apiUrl = "https://streamdata.vaplayer.ru/api.php?" + idParam + "=" + U_UrlEncode(mediaId) + "&type=" + mediaType
-    if mediaType = "tv" and season <> "" and episode <> "" then
-        apiUrl = apiUrl + "&season=" + season + "&episode=" + episode
-    end if
-
-    ' airflix1.com's player iframes nextgencloudfabric.com, which is now the
-    ' only Origin/Referer the vaplayer.ru stream API accepts - the old
-    ' brightpathsignals.com origin started returning HTTP 404 (verified
-    ' 2026-06: brightpathsignals/airflix1/no-referer -> 404, nextgencloudfabric
-    ' -> 200 with stream_urls). apiReferer also flows into the stream
-    ' validation GET below and the returned result envelope's referer.
-    apiReferer = "https://nextgencloudfabric.com/"
-    res = HC_Get(session, apiUrl, {
-        "Referer": apiReferer
-        "Origin": "https://nextgencloudfabric.com"
-    }, 8000)
-    if res = invalid or res.body = "" then return invalid
-
-    envelope = ParseJSON(res.body)
-    if envelope = invalid or type(envelope) <> "roAssociativeArray" then return invalid
-    sc = ""
-    if envelope.status_code <> invalid then sc = envelope.status_code.ToStr()
-    if sc <> "200" then return invalid
-    data = envelope.data
-    if data = invalid or type(data) <> "roAssociativeArray" then return invalid
-    streams = data.stream_urls
-    if streams = invalid or type(streams) <> "roArray" or streams.Count() = 0 then return invalid
-
-    ' Airflix serves subtitles in TWO separate lists: "subs" (usually just
-    ' English) and "default_subs" (all languages on shows that have them -
-    ' Mandalorian, Rings of Power, etc.). Each entry looks like
-    '   {"lang":"English (SDH)","code":"en","url":"https://..."}
-    ' - `code` is the ISO 639-1 code, `lang` is the display label (which
-    ' can be "English (SDH)", "English - eng(5)", "Portuguese (Brazilian)",
-    ' etc.). Pre-fix this read `s.lang` as the code, so language matching
-    ' downstream (English-first sort, PlayerView auto-pick) all fell over.
-    ' Merge all four possible source keys, deduplicate by URL, sort
-    ' English first by ISO code.
-    subs = []
-    seenSubUrl = {}
-    allRawSubs = []
-    subSources = [envelope.subs, data.subs, envelope.default_subs, data.default_subs]
-    for each lst in subSources
-        if lst = invalid or type(lst) <> "roArray" then continue for
-        for each s in lst
-            if type(s) <> "roAssociativeArray" then continue for
-            surl = ""
-            if s.url <> invalid then surl = s.url
-            if surl = "" and s.file <> invalid then surl = s.file
-            if surl = "" then continue for
-            if seenSubUrl.DoesExist(surl) then continue for
-            seenSubUrl[surl] = true
-            ' ISO code: prefer `code` (vaplayer / airflix1 default_subs
-            ' shape), then `language`, then a 2-char prefix of `lang` as a
-            ' last resort (works when `lang` is the bare ISO like "en").
-            lang = ""
-            if s.code <> invalid then lang = LCase(s.code)
-            if lang = "" and s.language <> invalid then lang = LCase(s.language)
-            if lang = "" and s.lang <> invalid and Len(s.lang) >= 2 then lang = LCase(Left(s.lang, 2))
-            if lang = "" then lang = "en"
-            ' Display name: prefer the full label (`lang`) so chips like
-            ' "English (SDH)" or "Portuguese (Brazilian)" stay legible.
-            name = ""
-            if s.label <> invalid then name = s.label
-            if name = "" and s.lang <> invalid then name = s.lang
-            if name = "" and s.language <> invalid then name = s.language
-            if name = "" then name = UCase(lang)
-            allRawSubs.Push({ url: surl, language: lang, name: name })
-        end for
-    end for
-    ' English first so the CC panel defaults to it and Roku's language
-    ' matching doesn't auto-select a track the device has no font for.
-    for each track in allRawSubs
-        if track.language = "en" then subs.Push(track)
-    end for
-    for each track in allRawSubs
-        if track.language <> "en" then subs.Push(track)
-    end for
-
-    for each streamUrl in streams
-        if type(streamUrl) <> "String" and type(streamUrl) <> "roString" then continue for
-        if streamUrl = "" then continue for
-        playlist = HC_Get(session, streamUrl, { "Referer": apiReferer }, 6000)
-        if playlist = invalid or playlist.body = "" then continue for
-        if Left(playlist.body, 7) <> "#EXTM3U" then continue for
-        ' Dead-lead-in (0-byte first segment) detection is handled
-        ' uniformly for every HLS provider in R_EnrichResult, so no
-        ' per-provider leadSkip probe here.
-        return {
-            url: streamUrl
-            streamFormat: "hls"
-            qualities: []
-            subtitles: subs
-            chapters: []
-            referer: apiReferer
-            userAgent: ""
-        }
-    end for
-
-    return invalid
-end function
-
 ' Detect a poisoned (0-byte) first media segment on ANY HLS stream and
 ' return how many seconds to skip so playback opens on the first real
 ' segment. Returns 0 when the first segment has data (the common case -
@@ -385,7 +257,7 @@ function RP_HlsLeadSkip(session as Object, masterBody as String, masterUrl as St
         t = U_Trim(line)
         if t = "" then continue for
         if Left(t, 1) = "#" then continue for
-        vurl = U_AbsUrl(t, HC_OriginOf(url))
+        vurl = RP_AbsUrl(t, url)
         if vurl = "" then continue for
         vres = HC_Get(session, vurl, { "Referer": referer }, 5000)
         if vres <> invalid and vres.body <> "" and Left(vres.body, 7) = "#EXTM3U" then
@@ -414,7 +286,7 @@ function RP_ProbeMediaPlaylist(session as Object, mediaBody as String, mediaUrl 
             if dm <> invalid and dm.Count() >= 2 then pendingDur = Val(dm[1])
             continue for
         end if
-        firstSeg = U_AbsUrl(t, HC_OriginOf(mediaUrl))
+        firstSeg = RP_AbsUrl(t, mediaUrl)
         firstDur = pendingDur
         exit for
     end for
@@ -657,6 +529,16 @@ function RP_ResolveXpass(embedUrl as String, refer as String, session as Object)
         end for
     end if
 
+    ' The inline list is empty on the current site; the real one is behind
+    ' the encrypted /data endpoint (ResolverMirrors.brs).
+    for each entry in RP_XpassEncryptedSources(html, final, session)
+        if type(entry) = "roAssociativeArray" and entry.url <> invalid and entry.url <> "" then
+            name = "source"
+            if entry.name <> invalid and entry.name <> "" then name = entry.name
+            candidates.Push({ label: name, url: RP_AbsUrl(entry.url, final) })
+        end if
+    end for
+
     ' Dedup while preserving order.
     seen = {}
     uniq = []
@@ -683,7 +565,14 @@ function RP_ResolveXpass(embedUrl as String, refer as String, session as Object)
 
     subs = RP_FetchXpassSubs(html, session)
 
+    ' Most of the ~30 listed sources are dead or undecodable at any given
+    ' time, so the walk is bounded by count and by wall clock.
+    clock = CreateObject("roTimespan")
+    clock.mark()
+    tried = 0
     for each c in uniq
+        tried = tried + 1
+        if tried > 10 or clock.totalMilliseconds() > 25000 then exit for
         playlistUrl = c.url
         plRes = HC_Get(session, playlistUrl, { "Referer": final }, 6000)
         if plRes = invalid or plRes.body = "" then continue for
@@ -696,6 +585,9 @@ function RP_ResolveXpass(embedUrl as String, refer as String, session as Object)
         verify = HC_Get(session, streamUrl, { "Referer": final }, 6000)
         if verify = invalid or verify.body = "" then continue for
         if Left(verify.body, 7) <> "#EXTM3U" then continue for
+        ' A live playlist is not proof: TIK segments are PNG-wrapped and
+        ' other backends 403 the segments themselves.
+        if not RP_HlsFirstSegmentOk(session, verify.body, streamUrl, final) then continue for
 
         return {
             url: streamUrl
@@ -716,10 +608,15 @@ function RP_XpassSrcRank(item as Object) as Integer
     url = ""
     if item.label <> invalid then label = UCase(item.label)
     if item.url <> invalid then url = LCase(item.url)
-    if Instr(1, label, "TIK") > 0 or Instr(1, url, "/mdata/") > 0 then return 100
-    if Instr(1, label, "MOV") > 0 or Instr(1, url, "mov.1x2") > 0 then return 0
-    if Instr(1, label, "VIP") > 0 or Instr(1, url, "/vip/") > 0 then return 1
-    if Instr(1, label, "SFY") > 0 or Instr(1, url, "/sfy/") > 0 then return 2
+    ' Names are "<backend> <n>". LUL (plain AES-128 HLS) and VIP are the
+    ' backends seen serving decodable segments; TIK / FIL / WIS are the
+    ' PNG-wrapped family and go last. Every source's URL is now under
+    ' /mdata/, so the path no longer says anything about the backend.
+    if Left(label, 3) = "LUL" then return 0
+    if Left(label, 3) = "VIP" or Instr(1, url, "/vip/") > 0 then return 1
+    if Left(label, 3) = "MOV" or Instr(1, url, "mov.1x2") > 0 then return 2
+    if Left(label, 3) = "SFY" or Instr(1, url, "/sfy/") > 0 then return 3
+    if Left(label, 3) = "TIK" or Left(label, 3) = "FIL" or Left(label, 3) = "WIS" then return 100
     return 50
 end function
 
@@ -819,10 +716,18 @@ function RP_FetchXpassSubs(html as String, session as Object) as Object
         if type(it) <> "roAssociativeArray" then continue for
         url = it.url
         if url = invalid or url = "" then continue for
+        url = RP_AbsUrl(url, m[1])
         lang = "en"
         if it.language <> invalid then lang = LCase(it.language)
+        ' sub.1x2.space spells the language out ("arabic"); the rest of
+        ' the channel keys on two-letter codes.
+        if Len(lang) > 3 then
+            codes = { english: "en", spanish: "es", french: "fr", german: "de", italian: "it", portuguese: "pt", arabic: "ar", chinese: "zh", japanese: "ja", korean: "ko", russian: "ru", dutch: "nl", turkish: "tr", polish: "pl", swedish: "sv", danish: "da", norwegian: "no", finnish: "fi", greek: "el", hebrew: "he", hindi: "hi", indonesian: "id", vietnamese: "vi", thai: "th", czech: "cs", hungarian: "hu", romanian: "ro", bulgarian: "bg", croatian: "hr", serbian: "sr", ukrainian: "uk", persian: "fa", malay: "ms" }
+            if codes.DoesExist(lang) then lang = codes[lang] else lang = Left(lang, 2)
+        end if
         name = ""
         if it.display <> invalid then name = it.display
+        if name = "" and it.label <> invalid then name = it.label
         if name = "" then
             if it.language <> invalid then name = UCase(it.language) else name = "EN"
         end if
@@ -1219,97 +1124,6 @@ function RP_ResolveMoviesapi(embedUrl as String, refer as String, session as Obj
     chain = R_FollowKnownIframes(page.body, final, refUrl, 0, session)
     if chain <> invalid and chain.url <> invalid and chain.url <> "" then return chain
     return RP_ResolveJwplayerPage(page.body, final, refUrl, session)
-end function
-
-' --- Phase 3: autoembed (.co) ----------------------------------------
-'
-' player.autoembed.cc is DEAD (NXDOMAIN). autoembed migrated to the .co TLD
-' and its player iframes nextgencloudfabric.com, which serves the stream from
-' streamdata.vaplayer.ru/api.php - the SAME backend as airflix1. The embed
-' page no longer carries inline stream URLs, so we hit that JSON API directly
-' (Referer https://nextgencloudfabric.com/, required by both the API and its
-' playlist CDNs) instead of walking iframes. Mirrors RP_ResolveAirflix.
-
-function RP_ResolveAutoembed(embedUrl as String, refer as String, session as Object) as Object
-    apiReferer = "https://nextgencloudfabric.com/"
-
-    pathRe = CreateObject("roRegex", "/embed/(movie|tv)/(tt\d+|\d+)(?:/(\d+)/(\d+))?", "i")
-    m = pathRe.match(embedUrl)
-    if m = invalid or m.Count() < 3 then return invalid
-    mediaType = m[1]
-    mediaId = m[2]
-    season = ""
-    episode = ""
-    if m.Count() >= 5 then
-        season = m[3]
-        episode = m[4]
-    end if
-
-    idParam = "tmdb"
-    if Left(mediaId, 2) = "tt" then idParam = "imdb"
-    apiUrl = "https://streamdata.vaplayer.ru/api.php?" + idParam + "=" + U_UrlEncode(mediaId) + "&type=" + mediaType
-    if mediaType = "tv" and season <> "" and episode <> "" then
-        apiUrl = apiUrl + "&season=" + season + "&episode=" + episode
-    end if
-
-    res = HC_Get(session, apiUrl, {
-        "Referer": apiReferer
-        "Origin": "https://nextgencloudfabric.com"
-    }, 8000)
-    if res = invalid or res.body = "" then return invalid
-
-    envelope = ParseJSON(res.body)
-    if envelope = invalid or type(envelope) <> "roAssociativeArray" then return invalid
-    sc = ""
-    if envelope.status_code <> invalid then sc = envelope.status_code.ToStr()
-    if sc <> "200" then return invalid
-    data = envelope.data
-    if data = invalid or type(data) <> "roAssociativeArray" then return invalid
-    streams = data.stream_urls
-    if streams = invalid or type(streams) <> "roArray" or streams.Count() = 0 then return invalid
-
-    for each streamUrl in streams
-        if type(streamUrl) <> "String" and type(streamUrl) <> "roString" then continue for
-        if streamUrl = "" then continue for
-        playlist = HC_Get(session, streamUrl, { "Referer": apiReferer }, 6000)
-        if playlist = invalid or playlist.body = "" then continue for
-        if Left(playlist.body, 7) <> "#EXTM3U" then continue for
-        return {
-            url: streamUrl
-            streamFormat: "hls"
-            qualities: []
-            subtitles: []
-            chapters: []
-            referer: apiReferer
-            userAgent: ""
-        }
-    end for
-
-    return invalid
-end function
-
-function RP_ResolveYthd(embedUrl as String, refer as String, session as Object) as Object
-    ' Fetch the embed page and extract data-hash="..." values - the
-    ' included sources.js iframes to https://cloudnestra.com/rcp/<hash>.
-    headers = {}
-    if refer <> "" then headers["Referer"] = refer
-    page = HC_Get(session, embedUrl, headers, 8000)
-    if page = invalid or page.body = "" then return invalid
-    ' The cloudnestra RCP host migrated to cloudorchestranova.com (cloudnestra.com
-    ' has no A record now). Read the live host+hash from the embed page's
-    ' player_iframe so we never hit the dead host (and survive future renames).
-    ifrRe = CreateObject("roRegex", "player_iframe" + chr(34) + "\s+src=" + chr(34) + "//([^/" + chr(34) + "]+)/rcp/([^" + chr(34) + "]+)" + chr(34), "i")
-    im = ifrRe.match(page.body)
-    if im <> invalid and im.Count() >= 3 then
-        rcpUrl = "https://" + im[1] + "/rcp/" + im[2]
-        return RP_ResolveCloudnestra(rcpUrl, embedUrl, session)
-    end if
-    re = CreateObject("roRegex", "data-hash=" + chr(34) + "([^" + chr(34) + "]+)" + chr(34), "i")
-    m = re.match(page.body)
-    if m = invalid or m.Count() < 2 then return invalid
-    hash = m[1]
-    rcpUrl = "https://cloudorchestranova.com/rcp/" + hash
-    return RP_ResolveCloudnestra(rcpUrl, embedUrl, session)
 end function
 
 ' --- Phase 4b: Videasy / Vidking shared port ------------------------

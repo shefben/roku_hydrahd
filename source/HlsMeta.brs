@@ -26,7 +26,8 @@
 function HM_FetchQualities(streamUrl as String, refer as String, session as Object) as Object
     out = []
     if streamUrl = invalid or streamUrl = "" then return out
-    if Instr(1, LCase(streamUrl), ".m3u8") = 0 then return out
+    ' No ".m3u8" check here: several CDNs serve HLS from extensionless
+    ' URLs (workers.dev proxies, /playlist/<id>). The body decides.
 
     headers = {}
     if refer <> "" then headers["Referer"] = refer
@@ -41,8 +42,22 @@ function HM_ParseMasterPlaylist(text as String, baseUrl as String) as Object
     if text = invalid or text = "" then return out
     lines = text.Tokenize(chr(10))
     if lines = invalid then return out
-
     n = lines.Count()
+
+    ' Audio groups that are delivered as their own playlists. A variant
+    ' that references one is video-only: playing its URL directly is
+    ' silent, so it can only be selected through the master playlist.
+    separateAudio = {}
+    for i = 0 to n - 1
+        line = lines[i]
+        if Left(line, 12) = "#EXT-X-MEDIA" then
+            media = HM_ParseAttrs(line)
+            if media.TYPE = "AUDIO" and media.URI <> invalid and media.URI <> "" and media["GROUP-ID"] <> invalid then
+                separateAudio[media["GROUP-ID"]] = true
+            end if
+        end if
+    end for
+
     for i = 0 to n - 1
         line = lines[i]
         if Left(line, 17) <> "#EXT-X-STREAM-INF" then continue for
@@ -50,15 +65,18 @@ function HM_ParseMasterPlaylist(text as String, baseUrl as String) as Object
         attrs = HM_ParseAttrs(line)
         bw = 0
         if attrs.BANDWIDTH <> invalid then bw = attrs.BANDWIDTH.ToInt()
-        height = 0
+        width = 0
+        rawHeight = 0
         resStr = ""
         if attrs.RESOLUTION <> invalid then resStr = attrs.RESOLUTION
         if resStr <> "" then
-            xIdx = Instr(1, resStr, "x")
-            if xIdx > 0 and xIdx < Len(resStr) then
-                height = Mid(resStr, xIdx + 1).ToInt()
+            xIdx = Instr(1, LCase(resStr), "x")
+            if xIdx > 1 and xIdx < Len(resStr) then
+                width = Left(resStr, xIdx - 1).ToInt()
+                rawHeight = Mid(resStr, xIdx + 1).ToInt()
             end if
         end if
+        height = HM_NominalHeight(width, rawHeight)
 
         ' Variant URL is the next non-comment, non-empty line.
         varUrl = ""
@@ -79,32 +97,77 @@ function HM_ParseMasterPlaylist(text as String, baseUrl as String) as Object
             label = (bw \ 1000).ToStr() + "kbps"
         end if
 
+        demuxed = false
+        if attrs.AUDIO <> invalid and separateAudio.DoesExist(attrs.AUDIO) then demuxed = true
+
         out.Push({
             label: label
             height: height
+            rawHeight: rawHeight
+            width: width
             bandwidth: bw
             url: varUrl
+            demuxed: demuxed
         })
     end for
 
-    ' Sort height-descending so PlayerView's auto-pick lands on the
-    ' highest available rendition. Insertion sort is fine for the
-    ' typical 3-6 variant count.
+    ' Sort height-descending (bitrate breaks ties) so PlayerView's
+    ' auto-pick lands on the highest available rendition. Insertion sort
+    ' is fine for the typical 3-6 variant count.
     for i = 1 to out.Count() - 1
         cur = out[i]
-        curH = cur.height
-        if curH = invalid then curH = 0
         j = i - 1
         while j >= 0
-            prevH = out[j].height
-            if prevH = invalid then prevH = 0
-            if prevH >= curH then exit while
+            prev = out[j]
+            if prev.height > cur.height then exit while
+            if prev.height = cur.height and prev.bandwidth >= cur.bandwidth then exit while
             out[j + 1] = out[j]
             j = j - 1
         end while
         out[j + 1] = cur
     end for
+
+    ' Two renditions in the same tier (e.g. 1080p at 6 and 3 Mbps) would
+    ' otherwise show as identical chips; tell them apart by bitrate.
+    counts = {}
+    for each q in out
+        if counts.DoesExist(q.label) then counts[q.label] = counts[q.label] + 1 else counts[q.label] = 1
+    end for
+    for each q in out
+        if counts[q.label] > 1 and q.bandwidth > 0 then
+            q.label = q.label + " " + HM_BitrateLabel(q.bandwidth)
+        end if
+    end for
     return out
+end function
+
+' The quality tier a rendition belongs to. RESOLUTION's height alone
+' mislabels anything wider than 16:9: a 2.40:1 film is 1920x800, which is
+' a 1080p encode, not "800p". A height that already is a standard tier is
+' kept (1440x720 is 720p); otherwise the width decides.
+function HM_NominalHeight(width as Integer, height as Integer) as Integer
+    if height <= 0 and width <= 0 then return 0
+    for each tier in [144, 240, 360, 480, 720, 1080, 1440, 2160, 4320]
+        if Abs(height - tier) * 100 <= tier * 3 then return tier
+    end for
+    nominal = height
+    if width > 0 then
+        byWidth = Int(width * 9 / 16 + 0.5)
+        if byWidth > nominal then nominal = byWidth
+    end if
+    for each tier in [144, 240, 360, 480, 540, 576, 720, 1080, 1440, 2160, 4320]
+        if Abs(nominal - tier) * 100 <= tier * 6 then return tier
+    end for
+    return nominal
+end function
+
+function HM_BitrateLabel(bandwidth as Integer) as String
+    kbps = bandwidth \ 1000
+    if kbps >= 1000 then
+        tenths = (kbps + 50) \ 100
+        return (tenths \ 10).ToStr() + "." + (tenths mod 10).ToStr() + " Mbps"
+    end if
+    return kbps.ToStr() + " kbps"
 end function
 
 ' Parse a single #EXT-X-* line's KEY=VALUE pairs. Quoted values keep
@@ -266,7 +329,8 @@ end function
 function HM_ExtractSubsHls(streamUrl as String, refer as String, session as Object) as Object
     out = []
     if streamUrl = invalid or streamUrl = "" then return out
-    if Instr(1, LCase(streamUrl), ".m3u8") = 0 then return out
+    ' No ".m3u8" check here: several CDNs serve HLS from extensionless
+    ' URLs (workers.dev proxies, /playlist/<id>). The body decides.
 
     headers = {}
     if refer <> "" then headers["Referer"] = refer

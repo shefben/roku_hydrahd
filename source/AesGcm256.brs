@@ -96,5 +96,18 @@ function AGD_AesEcbBlock(keyHex as String, blockBytes as Object) as Object
             out.Push(part2[i])
         end for
     end if
+    ' Process() is documented as Reinit + Update + Final, but not every
+    ' runtime returns the block from it for ECB. Fall back to the explicit
+    ' sequence rather than handing back an empty keystream block.
+    if out.Count() < 16 then
+        out = CreateObject("roByteArray")
+        cipher = CreateObject("roEVPCipher")
+        if cipher.Setup(true, "aes-256-ecb", keyHex, "", 0) <> 0 then return invalid
+        cipher.Reinit()
+        head = cipher.Update(blockBytes)
+        if head <> invalid then out.Append(head)
+        tail = cipher.Final()
+        if tail <> invalid then out.Append(tail)
+    end if
     return out
 end function

@@ -14,6 +14,33 @@ The filter lives in `source/HydraApi.brs::HA_IsMirrorBlocked` and is called from
 | `kllamrd.org` | CF-fronted with custom anti-bot. Returns HTTP 200 with empty body to plain HTTP clients (sets `PHPSESSID` cookie, encodes response with zstd which Roku can't decompress, returns 0-byte content even with Chrome-like UA + cookie jar). `cf-cache-status: DYNAMIC` confirms Cloudflare-fronted. Page content unreadable from script. | Site stops requiring zstd / drops the anti-bot header check |
 | `frembed.bond` | API endpoints return 403 "Invalid Referer" / "Forbidden" to script clients. Even when it occasionally responds, the catalog redirects to VOE / uqload / divxplayer — each needing its own resolver port (they're in the Phase 4 downstream-extractor plan). | Phase 4 downstream extractors (VOE, Uqload, Doodstream, Mixdrop) are implemented; revisit if frembed's anti-bot loosens |
 
+## Mirror status, 2026-11 sweep
+
+Run `python tools/check_live_mirrors.py` to redo this. It pulls HydraHD's current list for one movie and one episode, runs each embed through the channel's own resolver in brs-node, parses qualities, and probes every URL.
+
+| Mirror (picker name) | Resolver | Notes |
+|---|---|---|
+| `1src.org` (HydraVip), `www.1src.org` (Alfa) | `RP_ResolveOnesrc` | Page's own `?action=sources&provider=` JSON. No Referer needed. |
+| `vidfast.vc` (Charlie) | `RP_ResolveVidfast` | See below. Individual servers 404 per title. |
+| `vixsrc.to` (Hydra2) | `RP_ResolveVixsrc` | Audio is a separate rendition: qualities are pinned by bitrate on the master, never played as bare variant URLs. |
+| `airflix1.com` (Bravo), `ythd.org` (Hydra1) | `RP_ResolveVaplayer` | Stream list is ChaCha20; key lifted from a WASM module that rotates every 5 minutes. Token is single-use and IP-bound. |
+| `play.xpass.top` (Whiskey) | `RP_ResolveXpass` | Source list is AES-GCM behind `/data`; build id read from the player script. Most of its ~30 sources are dead or PNG-wrapped, so each is checked down to the first segment. |
+| `moviesapi.to`, `www.2embed.cc`, `www.vidy.st`, `primesrc.me` | none | Shown in the picker; play through the content-id fallback pool (a different mirror's stream). |
+| `vidup.to`, `embedmaster.link` | none | Hidden (see table above). |
+
+The fallback pool in `R_BuildFallbackCandidates` now holds only the mirrors above. The old pool (vidlove, vidsrc.cc, videasy, vidking, vidrock, 2embed, moviesapi.club, autoembed) was unreachable or empty.
+
+## vidfast.vc is resolved, not blocked
+
+HydraHD now lists `vidfast.vc`. It is the same Faststream player as `vidfast.pro` / `vidup.to`, and it is handled by `source/ResolverVidfast.brs` (dispatch in `R_DispatchByHost`). What changed since the row above was written: the "runtime-derived" request path turned out to be a sealed copy of the page's one-time `en` token, and the client is a virtualized script whose constants can be read out of an XOR-masked descriptor in the player chunk.
+
+- The page picks one of 20 player variants (`variantIndex`), each with a different transport. Only **variant 16** is ported; it is the only one the server has been seen to serve.
+- The path, CSRF token, endpoint ids and key material are hardcoded in `RP_VidfastConfig()` and tied to one chunk file name. When vidfast redeploys, the resolver logs `player chunk changed` and returns nothing, so the fallback chain takes over. Refresh with `python tools/vidfast_constants.py` and paste the output into `RP_VidfastConfig()`.
+- Offline checks: `python tools/test_vidfast.py` (fixtures in `tools/fixtures/vidfast`).
+- The stream CDN returns 403 without `Referer: https://vidfast.vc/`.
+
+`vidfast.pro` and `vidup.to` stay filtered: same player, but not verified against this resolver.
+
 ## Coverage impact
 
 After filtering, the user sees **10 of the original 16 HydraHD mirrors** in the picker (plus chains those mirrors expose):

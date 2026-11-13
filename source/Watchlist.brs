@@ -29,7 +29,7 @@ end function
 function W_FindRegistryKey(reg as Object, key as String) as String
     if reg.Exists(key) then return key
     if Instr(1, key, "https://hydrahd.ru/") = 0 then return ""
-    for each suffix in ["ru", "ws", "com", "io", "cc", "ac", "me"]
+    for each suffix in ["ru", "ws", "gd", "com", "io", "cc", "ac", "me"]
         for each prefix in ["https://hydrahd.", "http://hydrahd.", "https://www.hydrahd.", "http://www.hydrahd."]
             aliasKey = key.Replace("https://hydrahd.ru/", prefix + suffix + "/")
             if reg.Exists(aliasKey) then return aliasKey

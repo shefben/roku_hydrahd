@@ -1,7 +1,7 @@
 ' Utils.brs - String, regex, and JSON helpers reused by every screen.
 
 function U_DefaultBaseUrl() as String
-    return "https://hydrahd.ws"
+    return "https://hydrahd.gd"
 end function
 
 function U_NormalizeBaseUrl(base as String) as String
@@ -9,7 +9,10 @@ function U_NormalizeBaseUrl(base as String) as String
     while Right(base, 1) = "/" and Len(base) > 0
         base = Left(base, Len(base) - 1)
     end while
-    retired = CreateObject("roRegex", "^https?://(?:www\.)?hydrahd\.ru$", "i")
+    ' Retired domains 301 to the current one, but the mirror ajax endpoints
+    ' (/ajax/mov_0.php, /ajax/tv_0.php) answer 404 unless the Referer host is
+    ' the current domain - so a saved old domain must be migrated, not followed.
+    retired = CreateObject("roRegex", "^https?://(?:www\.)?hydrahd\.(?:ru|ws)$", "i")
     if base = "" or retired.IsMatch(base) then return U_DefaultBaseUrl()
     return base
 end function
@@ -18,7 +21,7 @@ end function
 function U_CatalogUrl(url as String) as String
     if url = invalid or url = "" then return ""
     base = U_NormalizeBaseUrl(U_PrefDefault("baseUrl", U_DefaultBaseUrl()))
-    known = CreateObject("roRegex", "^https?://(?:www\.)?hydrahd\.(?:ru|ws|com|io|cc|ac|me)(?=/|$)", "i")
+    known = CreateObject("roRegex", "^https?://(?:www\.)?hydrahd\.(?:ru|ws|gd|com|io|cc|ac|me)(?=/|$)", "i")
     if known.IsMatch(url) then return known.Replace(url, base)
     return U_AbsUrl(url, base)
 end function
@@ -26,7 +29,7 @@ end function
 ' Registry identity stays in the original namespace so existing favorites and
 ' resume positions survive the move. This string is a key, never a fetch URL.
 function U_CatalogIdentity(url as String) as String
-    known = CreateObject("roRegex", "^https?://(?:www\.)?hydrahd\.(?:ru|ws|com|io|cc|ac|me)(?=/|$)", "i")
+    known = CreateObject("roRegex", "^https?://(?:www\.)?hydrahd\.(?:ru|ws|gd|com|io|cc|ac|me)(?=/|$)", "i")
     return known.Replace(url, "https://hydrahd.ru")
 end function
 

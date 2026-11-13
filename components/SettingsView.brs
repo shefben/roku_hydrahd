@@ -15,7 +15,7 @@ sub init()
     ' We track the rows in display order so onKeyEvent can move focus
     ' up/down between them.
     m.baseRow = m.top.findNode("baseRow")
-    m.baseRow.buttons = ["Use hydrahd.ws", "Edit URL"]
+    m.baseRow.buttons = ["Use hydrahd.gd", "Edit URL"]
     m.baseRow.observeField("buttonSelected", "onBaseRowSelected")
 
     m.tmdbValue = m.top.findNode("tmdbValue")

@@ -88,7 +88,10 @@ end function
 function R_EnrichResult(raw as Object, args as Object, refer as String, session as Object) as Object
     if raw = invalid or raw.url = invalid or raw.url = "" then return raw
     streamUrl = raw.url
-    isHls = U_LooksHls(streamUrl)
+    ' Trust the provider's format over the URL: plenty of HLS streams have
+    ' no ".m3u8" in the URL, and skipping them here meant no quality
+    ' ladder, no embedded subtitles and no lead-in probe.
+    isHls = U_LooksHls(streamUrl) or raw.streamFormat = "hls"
 
     refUrl = ""
     if raw.referer <> invalid and raw.referer <> "" then refUrl = raw.referer
@@ -196,14 +199,19 @@ function R_DispatchByHost(embedUrl as String, refer as String, session as Object
     if Instr(1, host, "xpass.top") > 0 then return RP_ResolveXpass(embedUrl, refer, session)
     if host = "player.vidlove.cc" then return RP_ResolveVidlove(embedUrl, refer, session)
 
-    if Instr(1, host, "airflix1.com") > 0 or Instr(1, host, "brightpathsignals.com") > 0 then return RP_ResolveAirflix(embedUrl, refer, session)
+    ' airflix1 and ythd are two skins over one gated backend (ResolverVaplayer.brs).
+    if Instr(1, host, "airflix1.com") > 0 or Instr(1, host, "ythd.org") > 0 then return RP_ResolveVaplayer(embedUrl, refer, session)
+    if Instr(1, host, "1src.org") > 0 then return RP_ResolveOnesrc(embedUrl, refer, session)
+    if Instr(1, host, "vixsrc.") > 0 then return RP_ResolveVixsrc(embedUrl, refer, session)
 
     ' New providers cracked in this session.
     if Instr(1, host, "videasy.net") > 0 then return RP_ResolveVideasy(embedUrl, refer, session)
     if Instr(1, host, "vidking.net") > 0 then return RP_ResolveVidking(embedUrl, refer, session)
-    if Instr(1, host, "ythd.org") > 0 then return RP_ResolveYthd(embedUrl, refer, session)
     if Instr(1, host, "peachify.top") > 0 then return RP_ResolvePeachify(embedUrl, refer, session)
     if Instr(1, host, "primesrc.me") > 0 then return RP_ResolvePrimesrc(embedUrl, refer, session)
+    ' vidfast.vc sealed-transport API (ResolverVidfast.brs). vidfast.pro /
+    ' vidup.to stay stubbed below: same player, but not verified here.
+    if Instr(1, host, "vidfast.vc") > 0 then return RP_ResolveVidfast(embedUrl, refer, session)
 
     ' Phase 4 downstream extractors. These are typically reached through
     ' an iframe chain from primesrc / autoembed / 2embed rather than as
@@ -293,36 +301,32 @@ function R_BuildFallbackCandidates(kind as String, tmdb as String, imdb as Strin
     out = []
     isMovie = (kind <> "tv")
 
+    ' Only providers that answered in the 2026-11 live sweep. The previous
+    ' pool (vidlove, vidsrc.cc, videasy, vidking, vidrock, 2embed,
+    ' moviesapi.club, autoembed) was unreachable or returning nothing, and
+    ' walking it cost up to 20s per dead host before giving up.
     if tmdb <> "" then
         if isMovie then
-            out.Push("https://player.vidlove.cc/embed/movie/" + tmdb)
+            out.Push("https://1src.org/players/movieplayer.php?tmdb=" + tmdb)
+            out.Push("https://vidfast.vc/movie/" + tmdb)
+            out.Push("https://vixsrc.to/movie/" + tmdb)
             out.Push("https://airflix1.com/embed/movie/" + tmdb)
+            out.Push("https://ythd.org/embed/" + tmdb + "/")
             out.Push("https://play.xpass.top/e/movie/" + tmdb)
-            out.Push("https://vidsrc.cc/v2/embed/movie/" + tmdb)
-            out.Push("https://player.videasy.net/movie/" + tmdb)
-            out.Push("https://www.vidking.net/embed/movie/" + tmdb)
-            out.Push("https://vidrock.net/movie/" + tmdb)
-            out.Push("https://www.2embed.cc/embed/" + tmdb)
-            out.Push("https://moviesapi.club/movie/" + tmdb)
         else
-            out.Push("https://player.vidlove.cc/embed/tv/" + tmdb + "/" + season.ToStr() + "/" + episode.ToStr())
-            out.Push("https://airflix1.com/embed/tv/" + tmdb + "/" + season.ToStr() + "/" + episode.ToStr())
-            out.Push("https://play.xpass.top/e/tv/" + tmdb + "/" + season.ToStr() + "/" + episode.ToStr())
-            out.Push("https://vidsrc.cc/v2/embed/tv/" + tmdb + "/" + season.ToStr() + "/" + episode.ToStr())
-            out.Push("https://player.videasy.net/tv/" + tmdb + "/" + season.ToStr() + "/" + episode.ToStr())
-            out.Push("https://www.vidking.net/embed/tv/" + tmdb + "/" + season.ToStr() + "/" + episode.ToStr())
-            out.Push("https://vidsrc.vip/embed/tv/" + tmdb + "/" + season.ToStr() + "/" + episode.ToStr())
-            out.Push("https://www.2embed.cc/embedtv/" + tmdb + "&s=" + season.ToStr() + "&e=" + episode.ToStr())
-            out.Push("https://moviesapi.club/tv/" + tmdb + "-" + season.ToStr() + "-" + episode.ToStr())
+            se = season.ToStr() + "/" + episode.ToStr()
+            out.Push("https://1src.org/players/tvplayer.php?tmdb=" + tmdb + "&s=" + season.ToStr() + "&e=" + episode.ToStr())
+            out.Push("https://vidfast.vc/tv/" + tmdb + "/" + se)
+            out.Push("https://vixsrc.to/tv/" + tmdb + "/" + se)
+            out.Push("https://airflix1.com/embed/tv/" + tmdb + "/" + se)
+            out.Push("https://ythd.org/embed/" + tmdb + "/" + season.ToStr() + "-" + episode.ToStr() + "/")
+            out.Push("https://play.xpass.top/e/tv/" + tmdb + "/" + se)
         end if
-    end if
-    if imdb <> "" then
+    else if imdb <> "" then
         if isMovie then
-            out.Push("https://player.autoembed.co/embed/movie/" + imdb)
-            out.Push("https://ythd.org/embed/" + imdb + "/")
+            out.Push("https://airflix1.com/embed/movie/" + imdb)
         else
-            out.Push("https://player.autoembed.co/embed/tv/" + imdb + "/" + season.ToStr() + "/" + episode.ToStr())
-            out.Push("https://ythd.org/embed/" + imdb + "/" + season.ToStr() + "-" + episode.ToStr() + "/")
+            out.Push("https://airflix1.com/embed/tv/" + imdb + "/" + season.ToStr() + "/" + episode.ToStr())
         end if
     end if
     return out

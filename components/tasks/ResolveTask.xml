@@ -23,4 +23,7 @@
     <script type="text/brightscript" uri="pkg:/source/Resolver.brs" />
     <script type="text/brightscript" uri="pkg:/source/ResolverProviders.brs" />
     <script type="text/brightscript" uri="pkg:/source/ResolverVidlove.brs" />
+    <script type="text/brightscript" uri="pkg:/source/ResolverVidfast.brs" />
+    <script type="text/brightscript" uri="pkg:/source/ResolverVaplayer.brs" />
+    <script type="text/brightscript" uri="pkg:/source/ResolverMirrors.brs" />
 </component>

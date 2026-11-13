@@ -5,7 +5,7 @@
 # HydraHD - Roku Channel
 
 A Roku channel that browses and plays movies + TV shows from
-[hydrahd.ws](https://hydrahd.ws). All catalog data (home rows, search,
+[hydrahd.gd](https://hydrahd.gd). All catalog data (home rows, search,
 details, seasons / episodes, mirrors) is scraped directly from
 HydraHD's public HTML at runtime; no API key needed.
 

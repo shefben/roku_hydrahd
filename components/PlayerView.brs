@@ -283,6 +283,8 @@ sub onArgs()
     ' the user can drop back to ABR if their bandwidth can't sustain it.
     initUrl = m.streamUrl
     initFmt = m.streamFormat
+    m.bwMin = 0
+    m.bwMax = 0
     ' Honor the user's Default Video Quality (Settings): "best" (default,
     ' top rendition - the original behavior), "1080"/"720" (highest at or
     ' below that cap), or "saver" (lowest, for slow connections / data).
@@ -290,9 +292,17 @@ sub onArgs()
     selIdx = pickPreferredQualityIndex(pref)
     if selIdx >= 0 then
         sel = m.qualities[selIdx]
-        initUrl = sel.url
-        initFmt = "hls"
         m.activeQuality = selIdx
+        if sel.demuxed = true then
+            ' Audio comes from a separate rendition, so the variant URL on
+            ' its own is silent. Stay on the master playlist: "best" leaves
+            ' Roku's ABR free to climb, a capped preference only limits how
+            ' high it may go.
+            if pref <> "best" then m.bwMax = qualityKbps(sel) + 1
+        else
+            initUrl = sel.url
+            initFmt = "hls"
+        end if
         print "[Player] quality pref="; pref; " -> "; sel.label
     end if
     startPlayback(initUrl, initFmt)
@@ -395,6 +405,7 @@ sub startPlayback(url as String, fmt as String)
     cn.live = false
     cn.playStart = m.startPosition
     cn.httpCertificatesFile = "common:/certs/ca-bundle.crt"
+    applyBandwidthWindow(cn)
     if m.top.args.poster <> invalid then cn.HDPosterUrl = m.top.args.poster
 
     ' Use roHttpAgent + setHttpAgent rather than ContentNode.httpHeaders.
@@ -1358,6 +1369,12 @@ sub ingestRendition()
     if bw = invalid or bw = 0 then return
     label = "Auto"
     if info.segHeight <> invalid and info.segHeight > 0 then label = info.segHeight.ToStr() + "p"
+    ' A resolver-supplied ladder is authoritative. Its labels are quality
+    ' tiers ("1080p" for a 1920x800 film) while segHeight is the raw frame
+    ' height (800), so matching on label would append a dead "800p" chip.
+    for each q in m.qualities
+        if q.url <> invalid and q.url <> "" then return
+    end for
     found = false
     for each q in m.qualities
         if q.label = label then
@@ -1542,24 +1559,50 @@ end sub
 sub onQualityChosen()
     idx = m.qualityRow.itemSelected
     if idx = invalid then return
+    resumeAt = W_AsInt(m.video.position)
     if idx = 0 then
+        m.bwMin = 0
+        m.bwMax = 0
+        m.activeQuality = -1
         if m.streamUrl <> invalid and m.streamUrl <> "" then
-            switchSource(m.streamUrl, m.streamFormat)
+            switchSource(m.streamUrl, m.streamFormat, resumeAt)
         end if
         m.status.text = "Quality: Auto"
     else
         qIdx = idx - 1
         if qIdx < 0 or qIdx >= m.qualities.Count() then return
         q = m.qualities[qIdx]
-        if q.url <> invalid and q.url <> "" then
-            resumeAt = m.video.position
-            switchSource(q.url, "hls")
-            m.video.seek = resumeAt
-            m.status.text = "Quality: " + q.label
-        else
+        if q.url = invalid or q.url = "" then
             m.status.text = "Quality: " + q.label + " (auto - no per-rendition URL)"
+            return
         end if
+        m.activeQuality = qIdx
+        if q.demuxed = true then
+            ' Video-only rendition with separate audio: pin it by bitrate
+            ' on the master playlist instead of playing it on its own.
+            m.bwMin = qualityKbps(q) - 1
+            if m.bwMin < 0 then m.bwMin = 0
+            m.bwMax = qualityKbps(q) + 1
+            switchSource(m.streamUrl, m.streamFormat, resumeAt)
+        else
+            m.bwMin = 0
+            m.bwMax = 0
+            switchSource(q.url, "hls", resumeAt)
+        end if
+        m.status.text = "Quality: " + q.label
     end if
+end sub
+
+function qualityKbps(q as Object) as Integer
+    if q = invalid or q.bandwidth = invalid then return 0
+    return W_AsInt(q.bandwidth) \ 1000
+end function
+
+' Restrict which renditions of a master playlist Roku may pick (kbps).
+' Zero means unrestricted.
+sub applyBandwidthWindow(cn as Object)
+    if m.bwMax <> invalid and m.bwMax > 0 then cn.MaxBandwidth = m.bwMax
+    if m.bwMin <> invalid and m.bwMin > 0 then cn.MinBandwidth = m.bwMin
 end sub
 
 ' Pick a default-on subtitle track. Prefer a plain "English" (ISO code
@@ -1693,13 +1736,24 @@ sub onCcStyleChosen()
     m.status.text = "Caption style: " + m.ccStyleLabels[idx]
 end sub
 
-sub switchSource(url as String, fmt as String)
+sub switchSource(url as String, fmt as String, resumeAt = 0 as Integer)
     m.finishedRetries = 0
     cn = createObject("roSGNode", "ContentNode")
     cn.url = url
     if fmt = invalid or fmt = "" then fmt = U_StreamFormat(url)
     cn.streamFormat = fmt
     cn.title = m.title.text
+    ' Same essentials startPlayback sets. Without the certificate bundle an
+    ' https rendition fails to load, and without playStart the switch
+    ' restarts from 0:00 (a seek issued before the new content is ready is
+    ' dropped).
+    cn.live = false
+    cn.httpCertificatesFile = "common:/certs/ca-bundle.crt"
+    if resumeAt > 0 then cn.playStart = resumeAt
+    if m.top.args <> invalid and m.top.args.poster <> invalid then cn.HDPosterUrl = m.top.args.poster
+    applyBandwidthWindow(cn)
+    m.currentPlayUrl = url
+    m.currentPlayFmt = fmt
     if m.video.content <> invalid then
         if m.video.content.subtitleTracks <> invalid then
             cn.subtitleTracks = m.video.content.subtitleTracks
