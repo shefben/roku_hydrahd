@@ -27,11 +27,13 @@ function ST_ParseCues(text as Dynamic) as Object
     lines = text.Tokenize(Chr(10))   ' skips blank lines; we detect cues by the "-->" line
     arrowRe = CreateObject("roRegex", "(\d{1,2}:)?(\d{1,2}):(\d{2})[.,](\d{1,3})\s*-->\s*(\d{1,2}:)?(\d{1,2}):(\d{2})[.,](\d{1,3})", "")
     numRe = CreateObject("roRegex", "^\d+$", "")
+    ' OpenSubtitles stamps promo cues into the files it serves.
+    adRe = CreateObject("roRegex", "opensubtitles|osdb\.link|advertise your product|become vip member|support us and become vip", "i")
     cur = invalid
     for each ln in lines
         mm = arrowRe.Match(ln)
         if mm <> invalid and mm.Count() >= 9 then
-            if cur <> invalid and cur.text <> "" then cues.Push(cur)
+            if cur <> invalid and cur.text <> "" and not adRe.IsMatch(cur.text) then cues.Push(cur)
             cur = {
                 s:    ST_ToSec(mm[1], mm[2], mm[3], mm[4])
                 e:    ST_ToSec(mm[5], mm[6], mm[7], mm[8])
@@ -51,7 +53,7 @@ function ST_ParseCues(text as Dynamic) as Object
             end if
         end if
     end for
-    if cur <> invalid and cur.text <> "" then cues.Push(cur)
+    if cur <> invalid and cur.text <> "" and not adRe.IsMatch(cur.text) then cues.Push(cur)
     return cues
 end function
 

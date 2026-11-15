@@ -16,12 +16,27 @@ function UP_RepoBase() as String
 end function
 
 ' The published version number lives in the manifest as update_version (a
-' plain number such as 501, matching update/version.txt and the zip name).
+' plain number such as 502, matching update/version.txt and the zip name).
+' build_version carries the same number, so it is read too: the highest of
+' the two wins. The old fallback returned GetVersion() ("1.0.502"), which
+' compares as version 1 against "502" and made every launch offer an update.
 function UP_CurrentVersion() as String
     info = CreateObject("roAppInfo")
-    v = info.GetValue("update_version")
-    if UP_IsVersion(v) then return v
-    return info.GetVersion()
+    best = ""
+    candidates = [info.GetValue("update_version"), info.GetValue("build_version")]
+    full = info.GetVersion()
+    if full <> invalid and full <> "" then
+        parts = full.Tokenize(".")
+        if parts.Count() > 0 then candidates.Push(parts[parts.Count() - 1])
+    end if
+    for each v in candidates
+        if v <> invalid then v = U_Trim(v)
+        if UP_IsVersion(v) then
+            if best = "" or UP_Compare(v, best) > 0 then best = v
+        end if
+    end for
+    if best = "" then best = "0"
+    return best
 end function
 
 function UP_IsVersion(v as Dynamic) as Boolean
@@ -129,6 +144,26 @@ function UP_DigestHeader(challenge as String, password as String, method as Stri
     return h
 end function
 
+' WWW-Authenticate value of a response, or "". GetResponseHeaders drops
+' repeated names, so the array form is checked too.
+function UP_AuthChallenge(msg as Object) as String
+    headers = msg.GetResponseHeaders()
+    if headers <> invalid then
+        for each name in headers
+            if LCase(name) = "www-authenticate" and Instr(1, LCase(headers[name]), "digest") > 0 then return headers[name]
+        end for
+    end if
+    list = msg.GetResponseHeadersArray()
+    if list <> invalid then
+        for each entry in list
+            for each name in entry
+                if LCase(name) = "www-authenticate" and Instr(1, LCase(entry[name]), "digest") > 0 then return entry[name]
+            end for
+        end for
+    end if
+    return ""
+end function
+
 ' Download update/<version>.zip and install it on this device.
 ' Returns { ok, message }. ok with a restart pending may never be delivered.
 function UP_Install(version as String, password as String) as Object
@@ -170,34 +205,52 @@ function UP_Install(version as String, password as String) as Object
     body.Append(tail)
     if not body.WriteFile(bodyPath) then return { ok: false, message: "Could not stage the package." }
 
-    ' 3. Ask the installer for its digest challenge.
+    ' 3. Upload with roUrlTransfer's own digest login. On success the Roku
+    '    restarts the channel mid-request, so this usually never returns.
     target = "http://" + UP_DeviceIp() + "/plugin_install"
-    probe = UP_NewTransfer(port)
-    probe.SetUrl(target)
-    if not probe.AsyncGetToString() then return { ok: false, message: "Could not reach the Roku installer." }
-    msg = UP_Wait(probe, port, 10000)
-    if msg = invalid then return { ok: false, message: "Roku installer did not answer. Is Developer Mode on?" }
-    challenge = ""
-    headers = msg.GetResponseHeaders()
-    if headers <> invalid then
-        for each name in headers
-            if LCase(name) = "www-authenticate" then challenge = headers[name]
-        end for
-    end if
-    auth = UP_DigestHeader(challenge, password, "POST", "/plugin_install")
-    if auth = "" then return { ok: false, message: "Roku installer gave no login challenge (HTTP " + msg.GetResponseCode().ToStr() + "). Is Developer Mode on?" }
-
-    ' 4. Upload. On success the Roku restarts the channel mid-request.
+    contentType = "multipart/form-data; boundary=" + boundary
     post = UP_NewTransfer(port)
     post.SetUrl(target)
-    post.AddHeader("Authorization", auth)
-    post.AddHeader("Content-Type", "multipart/form-data; boundary=" + boundary)
+    post.SetUserAndPassword("rokudev", password)
+    post.AddHeader("Content-Type", contentType)
     if not post.AsyncPostFromFile(bodyPath) then return { ok: false, message: "Could not start the install." }
     msg = UP_Wait(post, port, 120000)
+    if msg = invalid then
+        DeleteFile(zipPath)
+        DeleteFile(bodyPath)
+        return { ok: false, message: "Install timed out." }
+    end if
+    code = msg.GetResponseCode()
+
+    ' 4. Built-in login refused or unavailable: answer the challenge by hand.
+    if code = 401 or code < 0 then
+        challenge = UP_AuthChallenge(msg)
+        if challenge = "" then
+            probe = UP_NewTransfer(port)
+            probe.SetUrl(target)
+            if probe.AsyncGetToString() then
+                pmsg = UP_Wait(probe, port, 10000)
+                if pmsg <> invalid then challenge = UP_AuthChallenge(pmsg)
+            end if
+        end if
+        auth = UP_DigestHeader(challenge, password, "POST", "/plugin_install")
+        if auth <> "" then
+            post = UP_NewTransfer(port)
+            post.SetUrl(target)
+            post.AddHeader("Authorization", auth)
+            post.AddHeader("Content-Type", contentType)
+            if post.AsyncPostFromFile(bodyPath) then
+                msg2 = UP_Wait(post, port, 120000)
+                if msg2 <> invalid then
+                    msg = msg2
+                    code = msg.GetResponseCode()
+                end if
+            end if
+        end if
+    end if
     DeleteFile(zipPath)
     DeleteFile(bodyPath)
-    if msg = invalid then return { ok: false, message: "Install timed out." }
-    code = msg.GetResponseCode()
+    if code < 0 then return { ok: false, message: "Could not reach the Roku installer (" + msg.GetFailureReason() + "). Is Developer Mode on?" }
     if code = 401 then return { ok: false, message: "Roku rejected the developer password." }
     text = msg.GetString()
     if text = invalid then text = ""

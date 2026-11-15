@@ -110,6 +110,8 @@ function R_EnrichResult(raw as Object, args as Object, refer as String, session 
         if args.season <> invalid then season = args.season
         if args.episode <> invalid then episode = args.episode
     end if
+    ' A provider may know the IMDb id when the caller did not.
+    if imdb = "" and raw.imdb <> invalid and (type(raw.imdb) = "String" or type(raw.imdb) = "roString") then imdb = raw.imdb
 
     if isHls then
         existingQualities = invalid

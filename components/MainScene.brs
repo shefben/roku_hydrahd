@@ -134,17 +134,33 @@ sub showUpdateDialog(buttons as Object)
     m.updateChoices.buttons = buttons
     m.updateChoices.visible = true
     m.updateDialog.visible = true
-    m.updateChoices.setFocus(true)
     m.updateChoices.focusButton = 0
+    m.updateChoices.setFocus(true)
+    m.top.observeField("focusedChild", "onSceneFocusWhileUpdate")
 end sub
 
 sub closeUpdateDialog()
+    m.top.unobserveField("focusedChild")
     m.updateDialog.visible = false
     focusActiveChild()
 end sub
 
+' While the update dialog is up, views loading underneath (Home rows,
+' search results, ...) may call setFocus on themselves. Pull focus back so
+' the remote keeps driving the dialog's buttons.
+sub onSceneFocusWhileUpdate()
+    if m.updateDialog = invalid or not m.updateDialog.visible then return
+    if m.updateChoices.isInFocusChain() then return
+    m.updateChoices.setFocus(true)
+end sub
+
 sub onUpdateChoice()
-    idx = m.updateChoices.buttonSelected
+    if m.updateDialog = invalid or not m.updateDialog.visible then return
+    handleUpdateChoice(m.updateChoices.buttonSelected)
+end sub
+
+sub handleUpdateChoice(idx as Dynamic)
+    if m.updateBusy then return
     buttons = m.updateChoices.buttons
     if idx = invalid or buttons = invalid or idx < 0 or idx >= buttons.Count() then return
     if buttons[idx] <> "Update Now" then
@@ -489,8 +505,21 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             closeUpdateDialog()
             return true
         end if
-        if key = "up" or key = "down" then return true
-        return false
+        ' A key only reaches the scene when the dialog's ButtonGroup does
+        ' not hold focus (a view that finished loading in the background
+        ' can take it). OK then landed on whatever sat under the dialog and
+        ' "Update Now" seemed dead. Drive the buttons from here instead.
+        buttons = m.updateChoices.buttons
+        count = 0
+        if buttons <> invalid then count = buttons.Count()
+        idx = m.updateChoices.buttonFocused
+        if idx = invalid or idx < 0 or idx >= count then idx = 0
+        if key = "left" and idx > 0 then idx = idx - 1
+        if key = "right" and idx < count - 1 then idx = idx + 1
+        m.updateChoices.setFocus(true)
+        m.updateChoices.focusButton = idx
+        if key = "OK" and count > 0 then handleUpdateChoice(idx)
+        return true
     end if
 
     ' OPTIONS (`*` on the Roku remote) is reserved for the active

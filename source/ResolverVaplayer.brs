@@ -428,6 +428,10 @@ function RP_ResolveVaplayer(embedUrl as String, refer as String, session as Obje
     end if
 
     subs = VA_Subtitles(envelope)
+    ' airflix1 TV links carry only a TMDB id; the API knows the IMDb id,
+    ' which the OpenSubtitles lookup in R_EnrichResult needs.
+    imdbId = ""
+    if data.imdb_id <> invalid and (type(data.imdb_id) = "String" or type(data.imdb_id) = "roString") then imdbId = data.imdb_id
 
     ' 5-6. playback token per stream host, then the first playlist that answers
     tokens = {}
@@ -471,6 +475,7 @@ function RP_ResolveVaplayer(embedUrl as String, refer as String, session as Obje
                         streamFormat: "hls"
                         qualities: []
                         subtitles: subs
+                        imdb: imdbId
                         chapters: []
                         referer: playerOrigin + "/"
                         userAgent: ""

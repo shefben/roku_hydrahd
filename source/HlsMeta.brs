@@ -470,6 +470,24 @@ end function
 ' OpenSubtitles indexes by IMDB only - TMDB ids are silently ignored
 ' upstream, so we don't bother trying them here.
 
+' sub.wyzie.io stopped accepting these links (HTTP 401 "Invalid download
+' link" / "API key required"), so every track built from it was dead. The
+' OpenSubtitles link itself still works: with the trailing ".gz" dropped it
+' serves the plain .srt, and the "subencoding-utf8" path segment converts
+' the text to UTF-8. SubtitleTask parses SRT the same as WebVTT.
+'   in:  https://dl.opensubtitles.org/en/download/src-api/vrf-x/filead/123.gz
+'   out: https://dl.opensubtitles.org/en/download/subencoding-utf8/src-api/vrf-x/filead/123
+function HM_OpenSubtitlesFileUrl(link as String) as String
+    if link = invalid then return ""
+    url = U_Trim(link)
+    if Left(url, 4) <> "http" then return ""
+    if Right(url, 3) = ".gz" then url = Left(url, Len(url) - 3)
+    if Instr(1, url, "/subencoding-") = 0 then
+        url = url.Replace("/download/", "/download/subencoding-utf8/")
+    end if
+    return url
+end function
+
 function HM_FetchFreeSubs(imdb as String, tmdb as String, kind as String, season as Integer, episode as Integer, session as Object) as Object
     return HM_QueryOpenSubtitles(imdb, kind, season, episode, session)
 end function
@@ -499,7 +517,6 @@ function HM_QueryOpenSubtitles(imdbId as String, kind as String, season as Integ
     payload = ParseJSON(res.body)
     if payload = invalid or type(payload) <> "roArray" then return out
 
-    vrfRe = CreateObject("roRegex", "/vrf-([a-f0-9]+)/filead/(\d+)", "i")
     seenLangs = {}
     for each entry in payload
         if type(entry) <> "roAssociativeArray" then continue for
@@ -510,11 +527,8 @@ function HM_QueryOpenSubtitles(imdbId as String, kind as String, season as Integ
         downloadLink = ""
         if entry.SubDownloadLink <> invalid then downloadLink = entry.SubDownloadLink
         if downloadLink = "" then continue for
-        mt = vrfRe.match(downloadLink)
-        if mt = invalid or mt.Count() < 3 then continue for
-        vrf = mt[1]
-        subId = mt[2]
-        wyzieUrl = "https://sub.wyzie.io/c/" + vrf + "/id/" + subId + "?format=vtt&encoding=UTF-8"
+        fileUrl = HM_OpenSubtitlesFileUrl(downloadLink)
+        if fileUrl = "" then continue for
         iso2 = ""
         if entry.ISO639 <> invalid then iso2 = LCase(entry.ISO639)
         if iso2 = "" then iso2 = Left(langId3, 2)
@@ -522,7 +536,7 @@ function HM_QueryOpenSubtitles(imdbId as String, kind as String, season as Integ
         if entry.LanguageName <> invalid then nameStr = entry.LanguageName
         if nameStr = "" then nameStr = UCase(langId3)
         out.Push({
-            url: wyzieUrl
+            url: fileUrl
             language: iso2
             name: nameStr
         })
