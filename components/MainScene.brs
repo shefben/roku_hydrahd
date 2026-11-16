@@ -1,14 +1,6 @@
 ' MainScene.brs - Top-level chrome + view router.
 
 sub init()
-    ' Rehydrate registry from the resolver before any view reads it. A
-    ' fresh sideload after "Delete + Install" starts with an empty
-    ' registry; pulling here means HomeView's Continue Watching row,
-    ' FavoritesView, and search history all see prior state on first
-    ' render. Pull is capped at 5s so an offline resolver can't block
-    ' boot indefinitely.
-    S_PullOnBoot()
-
     m.contentHost = m.top.findNode("contentHost")
     m.topBar = m.top.findNode("topBar")
     m.headerBar = m.top.findNode("headerBar")
@@ -87,7 +79,93 @@ sub init()
     m.updateChoices.observeField("buttonSelected", "onUpdateChoice")
     m.updateVersion = ""
     m.updateBusy = false
+
+    ' Where user data lives. First run asks; server mode shows the
+    ' "Who's watching?" picker at every launch. The update check waits
+    ' until that is answered so the two prompts never overlap.
+    m.toast = m.top.findNode("toast")
+    m.toastText = m.top.findNode("toastText")
+    m.toastTimer = m.top.findNode("toastTimer")
+    m.toastTimer.observeField("fire", "onToastTimer")
+    m.profileSetup = m.top.findNode("profileSetup")
+    m.profileSetup.observeField("finished", "onProfileSetupFinished")
+    m.updateCheckPending = true
+    mode = P_Mode()
+    if mode = "" then
+        openProfileSetup("mode", true, true)
+    else if mode = "network" then
+        if P_ServerUrl() = "" then
+            openProfileSetup("server", true, true)
+        else
+            openProfileSetup("users", P_ProfileId() = "", true)
+        end if
+    else
+        runPendingUpdateCheck()
+    end if
+end sub
+
+' --- User data / profiles ----------------------------------------------
+
+sub openProfileSetup(stepName as String, required as Boolean, atLaunch as Boolean)
+    m.profileSetup.open = { step: stepName, required: required, atLaunch: atLaunch }
+    m.profileSetup.callFunc("refocus", invalid)
+    m.top.observeField("focusedChild", "onSceneFocusWhileProfile")
+end sub
+
+' Views that finish loading behind the overlay may grab focus; hand it
+' straight back while the overlay is up.
+sub onSceneFocusWhileProfile()
+    if m.profileSetup = invalid or not m.profileSetup.visible then return
+    if m.profileSetup.isInFocusChain() then return
+    m.profileSetup.callFunc("refocus", invalid)
+end sub
+
+sub onProfileSetupFinished(event as Object)
+    res = event.getData()
+    m.top.unobserveField("focusedChild")
+    action = ""
+    if res <> invalid and res.action <> invalid then action = res.action
+    if action = "network" then
+        showToast("Watching as " + P_ProfileName())
+        reloadRootView()
+    else if action = "offline" then
+        showToast("HydraHD server not reachable. Using " + P_ProfileName() + "'s data saved on this TV.")
+        reloadRootView()
+    else if action = "local" then
+        reloadRootView()
+    else
+        focusActiveChild()
+    end if
+    runPendingUpdateCheck()
+end sub
+
+sub runPendingUpdateCheck()
+    if m.updateCheckPending <> true then return
+    m.updateCheckPending = false
     startUpdateTask("check", "")
+end sub
+
+' Rebuild the visible top-level view so it reads the newly active
+' profile's favorites and progress. Subviews are left alone.
+sub reloadRootView()
+    if m.viewStack.Count() = 1 then
+        top = m.viewStack[0]
+        m.viewStack = []
+        pushView(top.name, top.args)
+    end if
+    focusActiveChild()
+end sub
+
+sub showToast(text as String)
+    if m.toast = invalid then return
+    m.toastText.text = text
+    m.toast.visible = true
+    m.toastTimer.control = "stop"
+    m.toastTimer.control = "start"
+end sub
+
+sub onToastTimer()
+    m.toast.visible = false
 end sub
 
 ' --- Auto-update -------------------------------------------------------
@@ -210,6 +288,9 @@ sub pushView(viewName as String, args as Dynamic, state = invalid as Dynamic)
     ' Let the outgoing view release anything that must not outlive it
     ' (the Home banner trailer holds the video decoder the player needs).
     if m.activeChild <> invalid and m.activeChild.hasField("suspend") then m.activeChild.suspend = true
+    ' Leaving the player: send the final resume point to the profile
+    ' server now instead of waiting for the next heartbeat push.
+    if m.activeChild <> invalid and m.activeChild.subtype() = "PlayerView" then S_QueuePushNow()
 
     while m.contentHost.getChildCount() > 0
         m.contentHost.removeChildIndex(0)
@@ -349,6 +430,12 @@ sub onChildNavRequest(event as Object)
     ' the side drawer directly (panel slides fully in + focus lands on
     ' its first button). Handled before the discover-cancel below so a
     ' simple menu peek doesn't tear down LAN resolver discovery.
+    if action = "profileSetup" then
+        stepName = "users"
+        if payload.step <> invalid then stepName = payload.step
+        openProfileSetup(stepName, false, false)
+        return
+    end if
     if action = "openMenu" then
         if m.sideMenu <> invalid and m.sideMenu.visible then
             m.sideMenu.expandRequest = true
@@ -487,6 +574,13 @@ end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
+
+    ' Profile overlay: a key only lands here when focus slipped out of
+    ' it, so put focus back and swallow the key.
+    if m.profileSetup <> invalid and m.profileSetup.visible then
+        m.profileSetup.callFunc("refocus", invalid)
+        return true
+    end if
 
     ' Exit-confirm overlay traps input while visible.
     if m.exitDialog <> invalid and m.exitDialog.visible then

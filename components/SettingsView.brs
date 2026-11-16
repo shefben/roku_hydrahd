@@ -34,6 +34,11 @@ sub init()
     m.resolverStatus = m.top.findNode("resolverStatus")
     m.resolverStatus.text = ""
 
+    m.profileValue = m.top.findNode("profileValue")
+    m.profileRow = m.top.findNode("profileRow")
+    m.profileRow.buttons = ["Switch User...", "Server Address...", "Storage Location..."]
+    m.profileRow.observeField("buttonSelected", "onProfileRowSelected")
+
     m.qualityRow = m.top.findNode("qualityRow")
     m.qualityRow.buttons = ["Best", "1080p", "720p", "Data Saver"]
     m.qualityRow.observeField("buttonSelected", "onQualitySelected")
@@ -64,7 +69,7 @@ sub init()
     m.urlActionsRow.buttons = ["Save", "Cancel"]
     m.urlActionsRow.observeField("buttonSelected", "onUrlActionsSelected")
 
-    m.rowOrder = [m.baseRow, m.tmdbRow, m.inChannelRow, m.resolverRow, m.qualityRow, m.trailerRow, m.updateRow, m.ccSizeRow, m.ccColorRow, m.ccBgRow]
+    m.rowOrder = [m.baseRow, m.tmdbRow, m.inChannelRow, m.resolverRow, m.profileRow, m.qualityRow, m.trailerRow, m.updateRow, m.ccSizeRow, m.ccColorRow, m.ccBgRow]
     m.currentRow = 0
 
     m.editTarget = ""
@@ -127,7 +132,30 @@ sub refresh()
         m.updateValue.text = "Installed version " + ver + " - password saved, updates can install."
         m.updateValue.color = "0x9affa0ff"
     end if
+    if P_IsNetwork() then
+        m.profileValue.text = "On server " + P_ServerUrl() + " - watching as " + P_ProfileName()
+        m.profileValue.color = "0x9affa0ff"
+    else if P_Mode() = "network" then
+        m.profileValue.text = "On a server, but no user is chosen yet - using this TV's data."
+        m.profileValue.color = "0xffd24aff"
+    else
+        m.profileValue.text = "On this TV only."
+        m.profileValue.color = "0xc8c8c8ff"
+    end if
     paintCcPreview()
+end sub
+
+' The picker lives on MainScene (it is also the first-run dialog).
+sub onProfileRowSelected()
+    idx = m.profileRow.buttonSelected
+    stepName = "mode"
+    if idx = 0 then
+        stepName = "server"
+        if P_Mode() = "network" and P_ServerUrl() <> "" then stepName = "users"
+    else if idx = 1 then
+        stepName = "server"
+    end if
+    m.top.requestNav = { action: "profileSetup", step: stepName }
 end sub
 
 sub onUpdateRowSelected()

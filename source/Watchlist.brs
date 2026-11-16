@@ -15,7 +15,7 @@
 ' player); imdb is used as a fallback.
 
 function W_Section() as Object
-    return CreateObject("roRegistrySection", "HydraHD_Progress")
+    return CreateObject("roRegistrySection", P_SectionName("progress"))
 end function
 
 function W_ItemKey(imdb as String, href as String) as String
@@ -73,6 +73,7 @@ sub W_Write(key as String, data as Object)
     reg = W_Section()
     reg.Write(key, FormatJson(data))
     reg.Flush()
+    S_MarkChanged("progress", key)
     S_QueuePush()
 end sub
 
@@ -377,7 +378,7 @@ end function
 ' --- Favorites / "My List" ------------------------------------------
 
 function W_FavSection() as Object
-    return CreateObject("roRegistrySection", "HydraHD_Favorites")
+    return CreateObject("roRegistrySection", P_SectionName("favorites"))
 end function
 
 function W_IsFavorite(imdb as String, href as String) as Boolean
@@ -412,6 +413,7 @@ sub W_AddFavorite(ctx as Object)
     if existingKey <> "" then k = existingKey
     reg.Write(k, FormatJson(payload))
     reg.Flush()
+    S_MarkChanged("favorites", k)
     S_QueuePushNow()
 end sub
 
@@ -423,6 +425,7 @@ sub W_RemoveFavorite(imdb as String, href as String)
     if existingKey <> "" then
         while existingKey <> ""
             if not reg.Delete(existingKey) then exit while
+            S_MarkChanged("favorites", existingKey)
             existingKey = W_FindRegistryKey(reg, k)
         end while
         reg.Flush()
@@ -472,7 +475,7 @@ function W_SearchHistoryMax() as Integer
 end function
 
 function W_GetSearchHistory() as Object
-    reg = CreateObject("roRegistrySection", "HydraHD")
+    reg = CreateObject("roRegistrySection", P_SectionName("prefs"))
     if not reg.Exists("searchHistory") then return []
     raw = reg.Read("searchHistory")
     if raw = invalid or raw = "" then return []
@@ -498,17 +501,19 @@ sub W_PushSearchQuery(q as String)
             end if
         end if
     end for
-    reg = CreateObject("roRegistrySection", "HydraHD")
+    reg = CreateObject("roRegistrySection", P_SectionName("prefs"))
     reg.Write("searchHistory", FormatJson(out))
     reg.Flush()
+    S_MarkChanged("prefs", "searchHistory")
     S_QueuePushNow()
 end sub
 
 sub W_ClearSearchHistory()
-    reg = CreateObject("roRegistrySection", "HydraHD")
+    reg = CreateObject("roRegistrySection", P_SectionName("prefs"))
     if reg.Exists("searchHistory") then
         reg.Delete("searchHistory")
         reg.Flush()
+        S_MarkChanged("prefs", "searchHistory")
         S_QueuePushNow()
     end if
 end sub
@@ -546,7 +551,6 @@ sub W_RecordMirrorOutcome(host as String, success as Boolean)
     reg = W_MirrorSection()
     reg.Write(host, rec.ok.ToStr() + ":" + rec.fail.ToStr())
     reg.Flush()
-    S_QueuePush()
 end sub
 
 ' Ratio in 0..1, or -1 if we have no data on this host yet. The bonus

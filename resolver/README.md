@@ -18,6 +18,31 @@ python3 server.py --port 8787 --verbose
 Then in the Roku channel: **Settings → Set Resolver…** →
 `http://<machine-ip>:8787`.
 
+## User profiles (shared favorites and resume points)
+
+The same server can store each person's favorites, watch history,
+resume points and search history, so every Roku in the house shares
+them. On first run the channel asks whether to keep this data on the
+TV or on the server. It can be changed later under **Settings → User
+Data**. With the server option, the channel asks for the server's
+`IP:port` (default port 8787), then shows a "Who's watching?" list at
+every launch. Any TV can create, use or delete any user. There are no
+passwords or admin accounts.
+
+Profiles are stored as `state/profiles/profile-<id>.json` (or under
+`--state-dir`). Each TV keeps a copy of the active user's data. If the
+server is down, the channel keeps using that copy and sends the changes
+once the server is reachable again. The data on the server survives
+uninstalling and reinstalling the channel.
+
+| Method | Path | Body / reply |
+|---|---|---|
+| GET | `/profiles` | `{"profiles": [{"id", "name", "favorites", "inProgress", ...}]}` |
+| POST | `/profiles/create` | `{"name": "Ben"}` → `{"profile": {...}}`, 409 if the name exists |
+| POST | `/profiles/delete?id=<id>` | `{"ok": true}`, 404 if missing |
+| GET | `/profiles/state?id=<id>` | `{"profile": {...}, "data": {"progress": {}, "favorites": {}, "prefs": {}}}` |
+| POST | `/profiles/state?id=<id>` | `{"set": {section: {key: value}}, "del": {section: [key]}}` merges changes |
+
 ## API
 
 `GET /resolve?embed=<url>&refer=<page-url>&kind=movie|tv&imdb=tt…&tmdb=…&season=1&episode=2`

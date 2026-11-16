@@ -12,6 +12,7 @@
 
     <script type="text/brightscript" uri="pkg:/components/HomeView.brs" />
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Profiles.brs" />
     <script type="text/brightscript" uri="pkg:/source/Watchlist.brs" />
     <script type="text/brightscript" uri="pkg:/source/Sync.brs" />
 

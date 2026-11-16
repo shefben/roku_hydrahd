@@ -10,6 +10,7 @@
 
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Profiles.brs" />
     <script type="text/brightscript" uri="pkg:/source/Sync.brs" />
 
     <children>
@@ -85,5 +86,18 @@
             <ButtonGroup id="updateChoices" translation="[700, 604]" layoutDirection="horiz"
                          itemSpacings="[24]" minWidth="240" />
         </Group>
+
+        <!-- Storage choice and "Who's watching?" profile picker. Shown on
+             first run, and from Settings > User Data. -->
+        <ProfileSetup id="profileSetup" />
+
+        <!-- Short-lived notice ("Watching as Ben", server offline). -->
+        <Group id="toast" visible="false">
+            <Rectangle id="toastBg" translation="[1360, 940]" width="520" height="70" color="0x161616ee" />
+            <Rectangle translation="[1360, 940]" width="6" height="70" color="0xff2424ff" />
+            <Label id="toastText" translation="[1384, 940]" width="480" height="70" wrap="true" maxLines="2"
+                   vertAlign="center" font="font:SmallSystemFont" color="0xffffffff" text="" />
+        </Group>
+        <Timer id="toastTimer" duration="4" repeat="false" />
     </children>
 </component>

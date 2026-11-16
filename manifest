@@ -1,8 +1,8 @@
 title=HydraHD
 major_version=1
 minor_version=0
-build_version=503
-update_version=503
+build_version=504
+update_version=504
 mm_icon_focus_hd=pkg:/images/icon_focus_hd.png
 mm_icon_focus_sd=pkg:/images/icon_focus_sd.png
 mm_icon_side_hd=pkg:/images/icon_side_hd.png

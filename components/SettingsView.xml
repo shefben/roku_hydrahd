@@ -8,6 +8,7 @@
 
     <script type="text/brightscript" uri="pkg:/components/SettingsView.brs" />
     <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Profiles.brs" />
 
     <children>
         <Label translation="[60, 10]" text="Settings" font="font:LargeBoldSystemFont" color="0xffffffff" />
@@ -45,6 +46,15 @@
                 <Label id="resolverValue" translation="[0, 86]" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" />
                 <ButtonGroup id="resolverRow" translation="[0, 118]" layoutDirection="horiz" itemSpacings="[12]" minWidth="220" />
                 <Label id="resolverStatus" translation="[0, 170]" text="" font="font:SmallSystemFont" color="0x9affa0ff" />
+            </Group>
+
+            <Group>
+                <Label text="User Data (favorites, history, resume points)" font="font:MediumBoldSystemFont" color="0xffffffff" />
+                <Label translation="[0, 34]" width="1760" wrap="true" maxLines="2"
+                       text="Keep it on this TV, or on your HydraHD server (resolver/server.py) with one user per person, shared by every TV that uses the same server."
+                       font="font:SmallSystemFont" color="0x9a9a9aff" />
+                <Label id="profileValue" translation="[0, 86]" width="1760" text="" font="font:SmallSystemFont" color="0xc8c8c8ff" />
+                <ButtonGroup id="profileRow" translation="[0, 118]" layoutDirection="horiz" itemSpacings="[12]" minWidth="220" />
             </Group>
 
             <Group>

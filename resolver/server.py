@@ -2498,6 +2498,121 @@ def _state_save(did: str, payload: dict[str, Any]) -> bool:
             return False
 
 
+# --- User profiles ----------------------------------------------------
+#
+# Netflix-style profiles shared by every Roku on the LAN. Each profile is
+# one JSON file under <state-dir>/profiles/ holding that user's
+# favorites, watch progress and search history. There are no accounts or
+# passwords: every TV can list, create, use and delete any profile.
+#
+# The "data" object mirrors the channel's registry, one dict per logical
+# section, each value being the registry string as stored on the Roku:
+#   {"progress": {"m:<key>": "<json>", ...},
+#    "favorites": {"<key>": "<json>", ...},
+#    "prefs": {"searchHistory": "[...]"}}
+_PROFILE_SECTIONS = ("progress", "favorites", "prefs")
+_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9 _.'-]{1,24}$")
+_PROFILE_LOCK = threading.Lock()
+_PROFILE_MAX = 32
+_PROFILE_MAX_BYTES = 2_097_152
+
+
+def _profiles_dir() -> str | None:
+    if not _STATE_DIR:
+        return None
+    return os.path.join(_STATE_DIR, "profiles")
+
+
+def _profile_id_for(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+
+
+def _profile_path(pid: str) -> str | None:
+    base = _profiles_dir()
+    if not base or not pid or not re.fullmatch(r"[a-z0-9-]{1,64}", pid):
+        return None
+    return os.path.join(base, f"profile-{pid}.json")
+
+
+def _profile_read(pid: str) -> dict[str, Any] | None:
+    """Caller holds _PROFILE_LOCK."""
+    path = _profile_path(pid)
+    if not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            prof = json.load(f)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        LOG.info("profile read failed for %s: %s", pid, exc)
+        return None
+    if not isinstance(prof, dict):
+        return None
+    data = prof.get("data")
+    if not isinstance(data, dict):
+        data = {}
+    for sec in _PROFILE_SECTIONS:
+        if not isinstance(data.get(sec), dict):
+            data[sec] = {}
+    prof["data"] = data
+    prof["id"] = pid
+    return prof
+
+
+def _profile_write(prof: dict[str, Any]) -> bool:
+    """Caller holds _PROFILE_LOCK."""
+    path = _profile_path(prof.get("id", ""))
+    if not path:
+        return False
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(prof, f)
+        os.replace(tmp, path)
+        return True
+    except OSError as exc:
+        LOG.info("profile write failed for %s: %s", prof.get("id"), exc)
+        return False
+
+
+def _profile_summary(prof: dict[str, Any]) -> dict[str, Any]:
+    data = prof.get("data", {})
+    progress = data.get("progress", {})
+    return {
+        "id": prof.get("id", ""),
+        "name": prof.get("name", ""),
+        "created": prof.get("created", 0),
+        "updated": prof.get("updated", 0),
+        "favorites": len(data.get("favorites", {})),
+        "inProgress": sum(1 for k in progress if not k.startswith("c:")),
+    }
+
+
+def _profile_list() -> list[dict[str, Any]]:
+    base = _profiles_dir()
+    out: list[dict[str, Any]] = []
+    if not base or not os.path.isdir(base):
+        return out
+    with _PROFILE_LOCK:
+        for fn in os.listdir(base):
+            if not (fn.startswith("profile-") and fn.endswith(".json")):
+                continue
+            prof = _profile_read(fn[len("profile-"):-len(".json")])
+            if prof is not None:
+                out.append(_profile_summary(prof))
+    out.sort(key=lambda p: (p.get("created", 0), p.get("name", "").lower()))
+    return out
+
+
+def _clean_section(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(k): v if isinstance(v, str) else json.dumps(v, separators=(",", ":"))
+            for k, v in value.items() if k}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "HydraHDResolver/1.0"
 
@@ -2517,6 +2632,12 @@ class Handler(BaseHTTPRequestHandler):
         params = dict(urlparse.parse_qsl(parsed.query))
         if parsed.path == "/state":
             self._serve_state_get(params)
+            return
+        if parsed.path == "/profiles":
+            self._respond(200, {"profiles": _profile_list()})
+            return
+        if parsed.path == "/profiles/state":
+            self._serve_profile_get(params)
             return
         # Per-Roku cookie jar so concurrent devices don't trample each
         # other's session state. cid falls back to the client's TCP peer
@@ -2538,13 +2659,142 @@ class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self) -> None:  # noqa: N802
         self.do_GET()
 
+    # CORS preflight, so browser-based Roku simulators can POST JSON.
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse.urlparse(self.path)
         params = dict(urlparse.parse_qsl(parsed.query))
         if parsed.path == "/state":
             self._serve_state_put(params)
             return
+        if parsed.path == "/profiles/create":
+            self._serve_profile_create()
+            return
+        if parsed.path == "/profiles/delete":
+            self._serve_profile_delete(params)
+            return
+        if parsed.path == "/profiles/state":
+            self._serve_profile_update(params)
+            return
         self._respond(404, {"error": "not found"})
+
+    # ---- /profiles -----------------------------------------------------
+
+    def _read_json_body(self, limit: int) -> Any:
+        """Returns the parsed body, or None after sending a 400."""
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0 or length > limit:
+            LOG.info("%s: bad body length %d", self.path, length)
+            self._respond(400, {"error": "bad length"})
+            return None
+        raw = b""
+        try:
+            raw = self.rfile.read(length)
+            return json.loads(raw.decode("utf-8", "replace"))
+        except (ValueError, OSError) as exc:
+            LOG.info("%s: bad json body: %s: %r", self.path, exc, raw[:160])
+            self._respond(400, {"error": f"bad json: {exc}"})
+            return None
+
+    def _serve_profile_get(self, params: dict[str, str]) -> None:
+        pid = params.get("id", "")
+        with _PROFILE_LOCK:
+            prof = _profile_read(pid)
+        if prof is None:
+            self._respond(404, {"error": "no such profile"})
+            return
+        self._respond(200, {"profile": _profile_summary(prof), "data": prof["data"]})
+
+    def _serve_profile_create(self) -> None:
+        body = self._read_json_body(4096)
+        if body is None:
+            return
+        name = str(body.get("name", "") if isinstance(body, dict) else "").strip()
+        name = re.sub(r"\s+", " ", name)
+        if not _PROFILE_NAME_RE.match(name):
+            self._respond(400, {"error": "Names can be 1-24 letters, numbers, spaces or . _ ' -"})
+            return
+        pid = _profile_id_for(name)
+        if not pid:
+            self._respond(400, {"error": "The name needs at least one letter or number."})
+            return
+        if len(_profile_list()) >= _PROFILE_MAX:
+            self._respond(400, {"error": f"The server already has {_PROFILE_MAX} users."})
+            return
+        with _PROFILE_LOCK:
+            if _profile_read(pid) is not None:
+                self._respond(409, {"error": f"A user named {name} already exists."})
+                return
+            now = int(time.time())
+            prof = {"id": pid, "name": name, "created": now, "updated": now,
+                    "data": {sec: {} for sec in _PROFILE_SECTIONS}}
+            ok = _profile_write(prof)
+        if not ok:
+            self._respond(500, {"error": "Could not save the new user on the server."})
+            return
+        LOG.info("profile created: %s (%s)", name, pid)
+        self._respond(200, {"profile": _profile_summary(prof)})
+
+    def _serve_profile_delete(self, params: dict[str, str]) -> None:
+        pid = params.get("id", "")
+        path = _profile_path(pid)
+        with _PROFILE_LOCK:
+            if not path or not os.path.exists(path):
+                self._respond(404, {"error": "no such profile"})
+                return
+            try:
+                os.remove(path)
+            except OSError as exc:
+                self._respond(500, {"error": f"delete failed: {exc}"})
+                return
+        LOG.info("profile deleted: %s", pid)
+        self._respond(200, {"ok": True})
+
+    # Body: {"set": {section: {key: value}}, "del": {section: [key, ...]}}.
+    # Keys not mentioned are left alone, so two TVs on the same profile
+    # only overwrite the entries they actually changed.
+    def _serve_profile_update(self, params: dict[str, str]) -> None:
+        pid = params.get("id", "")
+        body = self._read_json_body(_PROFILE_MAX_BYTES)
+        if body is None:
+            return
+        if not isinstance(body, dict):
+            self._respond(400, {"error": "payload must be object"})
+            return
+        sets = body.get("set") if isinstance(body.get("set"), dict) else {}
+        dels = body.get("del") if isinstance(body.get("del"), dict) else {}
+        with _PROFILE_LOCK:
+            prof = _profile_read(pid)
+            if prof is None:
+                self._respond(404, {"error": "no such profile"})
+                return
+            data = prof["data"]
+            if body.get("replace") is True:
+                for sec in _PROFILE_SECTIONS:
+                    data[sec] = {}
+            for sec, keys in dels.items():
+                if sec in _PROFILE_SECTIONS and isinstance(keys, list):
+                    for k in keys:
+                        data[sec].pop(str(k), None)
+            for sec, entries in sets.items():
+                if sec in _PROFILE_SECTIONS:
+                    data[sec].update(_clean_section(entries))
+            prof["updated"] = int(time.time())
+            ok = _profile_write(prof)
+        if ok:
+            self._respond(200, {"ok": True})
+        else:
+            self._respond(500, {"error": "save failed"})
 
     def _serve_state_get(self, params: dict[str, str]) -> None:
         did = params.get("did", "")
