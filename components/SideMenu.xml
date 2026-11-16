@@ -12,6 +12,9 @@
              we never get burned by callFunc's parameter-arity rules. -->
         <field id="expandRequest" type="bool" value="false" alwaysNotify="true" />
 
+        <!-- Name of the active user for the avatar badge ("" = none). -->
+        <field id="profileName" type="string" value="" onChange="onProfileName" />
+
         <!-- Parent calls focusStrip to put focus on the collapsed
              trigger (or the open menu if already expanded). -->
         <function name="focusStrip" />
@@ -54,8 +57,18 @@
         <Group id="panel" translation="[-460, 0]">
             <Rectangle width="340" height="1080" color="0x0a0a0af0" />
             <Rectangle translation="[338, 0]" width="2" height="1080" color="0xff2424ff" opacity="0.7" />
-            <ButtonGroup id="menuBg" translation="[20, 80]" layoutDirection="vert"
-                         itemSpacings="[14]" minWidth="300" />
+            <!-- Netflix-style profile badge: tinted circle with the user's
+                 initial, name underneath. Centered in the 340-wide panel. -->
+            <Group id="avatar">
+                <Poster id="avatarCircle" uri="pkg:/images/avatar_circle.png"
+                        translation="[120, 34]" width="100" height="100" blendColor="0x3d7bd9ff" />
+                <Label id="avatarLetter" translation="[120, 34]" width="100" height="100" text=""
+                       horizAlign="center" vertAlign="center" font="font:LargeBoldSystemFont" color="0xffffffff" />
+                <Label id="avatarName" translation="[20, 140]" width="300" height="40" text=""
+                       horizAlign="center" vertAlign="center" font="font:SmallBoldSystemFont" color="0xffffffff" />
+            </Group>
+            <ButtonGroup id="menuBg" translation="[20, 196]" layoutDirection="vert"
+                         itemSpacings="[4]" minWidth="300" buttonHeight="88" />
         </Group>
 
         <Animation id="expandAnim" duration="0.22" easeFunction="outQuad" repeat="false">

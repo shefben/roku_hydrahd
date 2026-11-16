@@ -39,6 +39,7 @@ sub init()
     ' command field and dispatch.
     if m.sideMenu <> invalid then
         m.sideMenu.observeField("command", "onSideMenuCommand")
+        m.sideMenu.profileName = P_ProfileName()
     end if
 
     ' Voice / OS deep-link search: main.brs sets m.top.deepLink after the
@@ -60,10 +61,17 @@ sub init()
     m.viewStack = []
     m.activeChild = invalid
 
-    pushView("HomeView", invalid)
-    ' Park focus on the nav so the user always has a foothold even if
-    ' the home view is still loading or failed to fetch.
-    m.navButtons[0].setFocus(true)
+    ' Home is NOT built yet. When the launch user dialog is shown it is the
+    ' only thing on screen; Home (and its background loading, which used to
+    ' grab focus away from the dialog on real devices) starts only after it
+    ' closes. See startMainView.
+    m.mainStarted = false
+    m.pendingUpdate = invalid
+    ' Retries a held-back update prompt until Home is ready for it.
+    m.updateWait = m.top.createChild("Timer")
+    m.updateWait.duration = 1
+    m.updateWait.repeat = true
+    m.updateWait.observeField("fire", "onUpdateWait")
 
     ' Auto-discover the resolver on the LAN so the user never has to
     ' type an IP. Runs in the background; if it succeeds before the
@@ -79,6 +87,13 @@ sub init()
     m.updateChoices.observeField("buttonSelected", "onUpdateChoice")
     m.updateVersion = ""
     m.updateBusy = false
+    m.updatePwGroup = m.top.findNode("updatePwGroup")
+    m.updatePwKb = m.top.findNode("updatePwKb")
+    m.updatePwActions = m.top.findNode("updatePwActions")
+    m.updatePwActions.buttons = ["Save and Update", "Cancel"]
+    m.updatePwActions.observeField("buttonSelected", "onUpdatePwAction")
+    m.modalGuard = m.top.findNode("modalGuard")
+    m.modalGuard.observeField("fire", "enforceModalFocus")
 
     ' Where user data lives. First run asks; server mode shows the
     ' "Who's watching?" picker at every launch. The update check waits
@@ -100,42 +115,98 @@ sub init()
             openProfileSetup("users", P_ProfileId() = "", true)
         end if
     else
-        runPendingUpdateCheck()
+        startMainView()
     end if
+end sub
+
+' Build Home (tabs, rows, banner) once no launch dialog is in the way,
+' then look for an update. Called at most once.
+sub startMainView()
+    if m.mainStarted then return
+    m.mainStarted = true
+    pushView("HomeView", invalid)
+    ' Park focus on the nav so the user always has a foothold even if
+    ' the home view is still loading or failed to fetch.
+    m.navButtons[0].setFocus(true)
+    runPendingUpdateCheck()
 end sub
 
 ' --- User data / profiles ----------------------------------------------
 
 sub openProfileSetup(stepName as String, required as Boolean, atLaunch as Boolean)
     m.profileSetup.open = { step: stepName, required: required, atLaunch: atLaunch }
-    m.profileSetup.callFunc("refocus", invalid)
-    m.top.observeField("focusedChild", "onSceneFocusWhileProfile")
+    m.profileSetup.refocusRequest = true
+    startModalGuard()
+    setHomeModal()
 end sub
 
-' Views that finish loading behind the overlay may grab focus; hand it
-' straight back while the overlay is up.
-sub onSceneFocusWhileProfile()
-    if m.profileSetup = invalid or not m.profileSetup.visible then return
-    if m.profileSetup.isInFocusChain() then return
-    m.profileSetup.callFunc("refocus", invalid)
+' --- Modal focus guard ---------------------------------------------------
+'
+' Home (and other views) call setFocus on themselves when their content
+' arrives, which can be seconds after an overlay opened. That pulled the
+' cursor off the profile picker / update prompt and the user could not pick
+' anything. A focusedChild observer on the scene does not fire for every
+' such move, so both a scene observer and a short repeating timer check
+' that the open overlay still holds focus and take it back if not.
+
+sub startModalGuard()
+    m.top.unobserveField("focusedChild")
+    m.top.observeField("focusedChild", "enforceModalFocus")
+    m.modalGuard.control = "stop"
+    m.modalGuard.control = "start"
+end sub
+
+sub stopModalGuardIfIdle()
+    if modalOpen() then return
+    m.top.unobserveField("focusedChild")
+    m.modalGuard.control = "stop"
+end sub
+
+function modalOpen() as Boolean
+    if m.profileSetup <> invalid and m.profileSetup.visible then return true
+    if m.updatePwGroup <> invalid and m.updatePwGroup.visible then return true
+    if m.updateDialog <> invalid and m.updateDialog.visible then return true
+    return false
+end function
+
+sub enforceModalFocus()
+    if m.profileSetup <> invalid and m.profileSetup.visible then
+        if not m.profileSetup.isInFocusChain() then m.profileSetup.refocusRequest = true
+        return
+    end if
+    if m.updatePwGroup <> invalid and m.updatePwGroup.visible then
+        if not m.updatePwKb.isInFocusChain() and not m.updatePwActions.isInFocusChain() then m.updatePwKb.setFocus(true)
+        return
+    end if
+    if m.updateDialog <> invalid and m.updateDialog.visible then
+        if m.updateChoices.visible and not m.updateChoices.isInFocusChain() then m.updateChoices.setFocus(true)
+        return
+    end if
+    stopModalGuardIfIdle()
 end sub
 
 sub onProfileSetupFinished(event as Object)
     res = event.getData()
-    m.top.unobserveField("focusedChild")
+    stopModalGuardIfIdle()
     action = ""
     if res <> invalid and res.action <> invalid then action = res.action
+    if m.sideMenu <> invalid then m.sideMenu.profileName = P_ProfileName()
     if action = "network" then
         showToast("Watching as " + P_ProfileName())
-        reloadRootView()
     else if action = "offline" then
         showToast("HydraHD server not reachable. Using " + P_ProfileName() + "'s data saved on this TV.")
-        reloadRootView()
-    else if action = "local" then
+    end if
+    if not m.mainStarted then
+        ' Launch dialog closed: only now build Home for the chosen user.
+        startMainView()
+        return
+    end if
+    if action = "network" or action = "offline" or action = "local" then
         reloadRootView()
     else
         focusActiveChild()
     end if
+    setHomeModal()
     runPendingUpdateCheck()
 end sub
 
@@ -191,9 +262,9 @@ sub onUpdateResult(event as Object)
         ' again on the next launch.
         if m.viewStack.Count() > 0 and m.viewStack[m.viewStack.Count() - 1].name = "PlayerView" then return
         m.updateVersion = res.latest
-        m.updateTitle.text = "Update available"
-        m.updateText.text = "Version " + res.latest + " is available (installed: " + res.current + "). Update now, or wait until the next time the channel starts?"
-        showUpdateDialog(["Update Now", "Later"])
+        m.pendingUpdate = res
+        m.updateWait.control = "start"
+        maybeShowPendingUpdate()
         return
     end if
     ' Install finished without the channel being restarted under us.
@@ -208,28 +279,76 @@ sub onUpdateResult(event as Object)
     showUpdateDialog(["OK"])
 end sub
 
+' The update prompt waits until Home has finished loading and the remote
+' is on it. Showing it earlier let Home's late setFocus calls (rows
+' arriving, banner trailer starting) take the remote off the prompt.
+sub maybeShowPendingUpdate()
+    res = m.pendingUpdate
+    if res = invalid then return
+    if modalOpen() then return
+    if m.activeChild = invalid then return
+    if m.activeChild.hasField("loading") and m.activeChild.loading = true then return
+    if not m.activeChild.isInFocusChain() and not navHasFocus() then return
+    m.pendingUpdate = invalid
+    m.updateWait.control = "stop"
+    m.updateTitle.text = "Update available"
+    m.updateText.text = "Version " + res.latest + " is available (installed: " + res.current + "). Update now or later?"
+    showUpdateDialog(["Update Now", "Later"])
+end sub
+
+' Tell Home whether a dialog covers it, so it holds the banner trailer.
+sub setHomeModal()
+    if m.activeChild = invalid or not m.activeChild.hasField("modal") then return
+    m.activeChild.modal = modalOpen()
+end sub
+
 sub showUpdateDialog(buttons as Object)
     m.updateChoices.buttons = buttons
     m.updateChoices.visible = true
     m.updateDialog.visible = true
     m.updateChoices.focusButton = 0
     m.updateChoices.setFocus(true)
-    m.top.observeField("focusedChild", "onSceneFocusWhileUpdate")
+    startModalGuard()
+    setHomeModal()
 end sub
 
 sub closeUpdateDialog()
-    m.top.unobserveField("focusedChild")
     m.updateDialog.visible = false
+    m.updatePwGroup.visible = false
+    stopModalGuardIfIdle()
+    setHomeModal()
     focusActiveChild()
 end sub
 
-' While the update dialog is up, views loading underneath (Home rows,
-' search results, ...) may call setFocus on themselves. Pull focus back so
-' the remote keeps driving the dialog's buttons.
-sub onSceneFocusWhileUpdate()
-    if m.updateDialog = invalid or not m.updateDialog.visible then return
-    if m.updateChoices.isInFocusChain() then return
+' Password entry straight from the prompt, so the user does not have to
+' leave, find Settings and restart the channel.
+sub openUpdatePassword()
+    m.updatePwKb.text = U_PrefDefault("devPassword", "")
+    m.updatePwGroup.visible = true
+    m.updatePwKb.setFocus(true)
+    startModalGuard()
+end sub
+
+sub closeUpdatePassword()
+    m.updatePwGroup.visible = false
     m.updateChoices.setFocus(true)
+end sub
+
+sub onUpdatePwAction()
+    if not m.updatePwGroup.visible then return
+    idx = m.updatePwActions.buttonSelected
+    if idx = 0 then
+        pw = U_Trim(m.updatePwKb.text)
+        if pw = "" then return
+        U_PrefSet("devPassword", pw)
+        m.updatePwGroup.visible = false
+        m.updateTitle.text = "Update available"
+        m.updateText.text = "Version " + m.updateVersion + " is available."
+        showUpdateDialog(["Update Now", "Later"])
+        handleUpdateChoice(0)
+    else
+        closeUpdatePassword()
+    end if
 end sub
 
 sub onUpdateChoice()
@@ -241,14 +360,18 @@ sub handleUpdateChoice(idx as Dynamic)
     if m.updateBusy then return
     buttons = m.updateChoices.buttons
     if idx = invalid or buttons = invalid or idx < 0 or idx >= buttons.Count() then return
+    if buttons[idx] = "Enter Password" then
+        openUpdatePassword()
+        return
+    end if
     if buttons[idx] <> "Update Now" then
         closeUpdateDialog()
         return
     end if
     if U_PrefDefault("devPassword", "") = "" then
         m.updateTitle.text = "Developer password needed"
-        m.updateText.text = "To install updates the channel needs this Roku's developer (rokudev) password. Enter it under Options > Settings > Auto-Update, then restart the channel."
-        showUpdateDialog(["OK"])
+        m.updateText.text = "Installing needs this Roku's developer (rokudev) password, the one chosen when Developer Mode was turned on."
+        showUpdateDialog(["Enter Password", "Later"])
         return
     end if
     m.updateBusy = true
@@ -412,9 +535,18 @@ sub onNavSelected(event as Object)
     end for
 end sub
 
+sub onUpdateWait()
+    if m.pendingUpdate = invalid then
+        m.updateWait.control = "stop"
+        return
+    end if
+    maybeShowPendingUpdate()
+end sub
+
 sub onChildLoading(event as Object)
     flag = event.getData()
     setLoading(flag)
+    if flag <> true then maybeShowPendingUpdate()
 end sub
 
 sub setLoading(flag as Boolean)
@@ -578,7 +710,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     ' Profile overlay: a key only lands here when focus slipped out of
     ' it, so put focus back and swallow the key.
     if m.profileSetup <> invalid and m.profileSetup.visible then
-        m.profileSetup.callFunc("refocus", invalid)
+        m.profileSetup.refocusRequest = true
         return true
     end if
 
@@ -589,6 +721,20 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             return true
         end if
         return false   ' let the ButtonGroup handle left/right/OK
+    end if
+
+    ' Password entry: Keyboard <-> buttons with UP/DOWN, BACK cancels.
+    if m.updatePwGroup <> invalid and m.updatePwGroup.visible then
+        if key = "back" then
+            closeUpdatePassword()
+        else if key = "down" and not m.updatePwActions.isInFocusChain() then
+            m.updatePwActions.setFocus(true)
+        else if key = "up" and m.updatePwActions.isInFocusChain() then
+            m.updatePwKb.setFocus(true)
+        else
+            enforceModalFocus()
+        end if
+        return true
     end if
 
     ' Update prompt traps input while visible; BACK means "later" unless

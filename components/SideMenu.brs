@@ -47,7 +47,30 @@ sub init()
         settings:  "navSettings"
         home:      "navHome"
     }
+    m.avatar = m.top.findNode("avatar")
+    m.avatarCircle = m.top.findNode("avatarCircle")
+    m.avatarLetter = m.top.findNode("avatarLetter")
+    m.avatarName = m.top.findNode("avatarName")
+    onProfileName()
     updateStripVisual(false)
+end sub
+
+' Avatar badge: first letter on a colored circle, name below. The color
+' is picked from the name, so it looks random but stays the same for a
+' given user on every launch and every TV.
+sub onProfileName()
+    name = m.top.profileName
+    if name = invalid then name = ""
+    name = name.Trim()
+    if name = "" then name = "Guest"
+    m.avatarLetter.text = UCase(Left(name, 1))
+    m.avatarName.text = name
+    palette = ["0xe50914ff", "0x3d7bd9ff", "0x2fa84fff", "0xf5a623ff", "0x9b59b6ff", "0x1abc9cff", "0xe67e22ff", "0xd63384ff", "0x5c6bc0ff", "0x8d6e63ff"]
+    h = 0
+    for i = 1 to Len(name)
+        h = (h * 31 + Asc(Mid(LCase(name), i, 1))) mod 9973
+    end for
+    m.avatarCircle.blendColor = palette[h mod palette.Count()]
 end sub
 
 sub updateStripVisual(focused as Boolean)

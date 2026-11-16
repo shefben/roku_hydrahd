@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Full-screen overlay for choosing where user data lives and which
+     server profile to use. MainScene owns the only instance. -->
+<component name="ProfileSetup" extends="Group">
+    <interface>
+        <!-- { step: "mode"|"server"|"users", required: bool, message: "" } -->
+        <field id="open" type="assocarray" onChange="onOpen" alwaysNotify="true" />
+        <!-- { action: "local"|"network"|"cancel" } -->
+        <field id="finished" type="assocarray" alwaysNotify="true" />
+        <function name="refocus" />
+        <field id="refocusRequest" type="bool" onChange="onRefocusRequest" alwaysNotify="true" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/ProfileSetup.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Profiles.brs" />
+
+    <children>
+        <Rectangle width="1920" height="1080" color="0x000000f0" />
+        <Rectangle translation="[360, 90]" width="1200" height="900" color="0x161616ff" />
+        <Rectangle translation="[360, 90]" width="1200" height="4" color="0xff2424ff" />
+        <Label id="title" translation="[360, 120]" width="1200" height="60" text=""
+               horizAlign="center" vertAlign="center" font="font:LargeBoldSystemFont" color="0xffffffff" />
+        <Label id="message" translation="[400, 186]" width="1120" height="130" wrap="true" maxLines="4"
+               text="" horizAlign="center" vertAlign="top" font="font:SmallSystemFont" color="0xc8c8c8ff" />
+
+        <!-- Vertical choices: storage mode, confirmations. -->
+        <ButtonGroup id="choices" translation="[660, 330]" layoutDirection="vert"
+                     itemSpacings="[18]" minWidth="600" visible="false" />
+
+        <!-- User list. -->
+        <LabelList id="userList" translation="[610, 320]" itemSize="[700, 60]" numRows="8"
+                   itemSpacing="[0, 6]" visible="false" />
+
+        <!-- Text entry: server address, new user name. -->
+        <Group id="entry" visible="false">
+            <Keyboard id="kb" translation="[440, 310]" />
+            <ButtonGroup id="kbActions" translation="[660, 830]" layoutDirection="horiz"
+                         itemSpacings="[24]" minWidth="280" />
+        </Group>
+
+        <Label id="busy" translation="[360, 500]" width="1200" height="60" text="" visible="false"
+               horizAlign="center" vertAlign="center" font="font:MediumBoldSystemFont" color="0xffffffff" />
+    </children>
+</component>

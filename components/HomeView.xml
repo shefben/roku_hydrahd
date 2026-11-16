@@ -8,6 +8,11 @@
         <field id="viewState" type="assocarray" />
         <!-- Set by MainScene just before this view is torn down. -->
         <field id="suspend" type="bool" alwaysNotify="true" onChange="onSuspend" />
+        <!-- True while MainScene shows a dialog on top (update prompt,
+             password entry, user picker). Stops and blocks the banner
+             trailer: starting its Video took the remote away from the
+             dialog on real Rokus. -->
+        <field id="modal" type="bool" value="false" onChange="onModal" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/HomeView.brs" />
@@ -75,7 +80,7 @@
         <Group id="trailerBox" translation="[1250, 36]" visible="false">
             <Rectangle translation="[-3, -3]" width="630" height="357" color="0xffffff55" />
             <Rectangle width="624" height="351" color="0x000000ff" />
-            <Video id="trailer" width="624" height="351" enableUI="false" />
+            <Video id="trailer" width="624" height="351" enableUI="false" focusable="false" />
         </Group>
 
         <Timer id="descTimer" duration="0.45" repeat="false" />

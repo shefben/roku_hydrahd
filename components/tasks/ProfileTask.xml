@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<component name="ProfileTask" extends="Task">
+    <interface>
+        <!-- list | create | delete | sync | push -->
+        <field id="mode" type="string" />
+        <field id="server" type="string" />
+        <field id="profileId" type="string" />
+        <field id="name" type="string" />
+        <field id="result" type="assocarray" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/tasks/ProfileTask.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Profiles.brs" />
+</component>

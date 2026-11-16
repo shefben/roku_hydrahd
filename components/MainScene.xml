@@ -87,6 +87,22 @@
                          itemSpacings="[24]" minWidth="240" />
         </Group>
 
+        <!-- Developer password entry, opened from the update prompt. -->
+        <Group id="updatePwGroup" visible="false">
+            <Rectangle width="1920" height="1080" color="0x000000ee" />
+            <LayoutGroup translation="[300, 160]" layoutDirection="vert" itemSpacings="[20]">
+                <Label text="Enter this Roku's developer (rokudev) password" font="font:LargeBoldSystemFont" color="0xffffffff" />
+                <Label width="1320" wrap="true" maxLines="2" font="font:SmallSystemFont" color="0xc8c8c8ff"
+                       text="It is the password chosen when Developer Mode was turned on. It is saved on this TV and can be changed later under Options > Settings > Auto-Update. DOWN reaches the buttons." />
+                <Keyboard id="updatePwKb" />
+                <ButtonGroup id="updatePwActions" layoutDirection="horiz" itemSpacings="[14]" minWidth="240" />
+            </LayoutGroup>
+        </Group>
+
+        <!-- While a modal overlay is open, this re-takes focus if a view
+             that finished loading underneath grabbed it. -->
+        <Timer id="modalGuard" duration="0.3" repeat="true" />
+
         <!-- Storage choice and "Who's watching?" profile picker. Shown on
              first run, and from Settings > User Data. -->
         <ProfileSetup id="profileSetup" />

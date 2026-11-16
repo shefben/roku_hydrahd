@@ -146,6 +146,7 @@ sub onTrailerTimer()
     href = m.heroHref
     if href = "" then return
     if not U_PrefDefault("bannerTrailers", true) then return
+    if m.top.modal then return
     ' Only while the user is on the rows - not while the top bar, side
     ' menu or exit prompt has the remote.
     if not m.rows.isInFocusChain() then return
@@ -178,8 +179,17 @@ sub onTrailerResult()
     if res.href = m.heroHref and m.rows.isInFocusChain() then playTrailer(res.url)
 end sub
 
+sub onModal()
+    if m.top.modal then
+        m.trailerTimer.control = "stop"
+        cancelTrailerTask()
+        stopTrailer()
+    end if
+end sub
+
 sub playTrailer(url as String)
     if url = "" then return
+    if m.top.modal then return
     cn = createObject("roSGNode", "ContentNode")
     cn.url = url
     cn.streamFormat = "mp4"
